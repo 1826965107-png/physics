@@ -20,7 +20,9 @@ dv/dt = − r/|r|³  −  v × B        （原子单位，RK4，每圈公转 180
 
 ![界面](larmor-precession/preview-1-ui.png)
 
-![对顶双锥与球面带](larmor-precession/preview-2-poster.png)
+![默认视图：轨道环绕 Z 轴叠开成扇面](larmor-precession/preview-2-fan.png)
+
+![把轨迹拉长就是"毛线球"](larmor-precession/preview-3-wool.png)
 
 **数值验证**（`node larmor-precession/verify.js`）：
 

@@ -47,6 +47,10 @@ var COL = {
   trailA: [ 62, 150, 255],
   trailB: [226, 248, 255],
   elec:   [255, 255, 255],
+  dial:   [186, 226, 255],
+  dialA:  [104, 222, 255],
+  ghost:  [132, 150, 196],
+  xyz:    [122, 142, 178],
   white:  [255, 255, 255]
 };
 
@@ -56,7 +60,7 @@ function createApp(canvas, doc, win) {
   var dpr = 1;
 
   /* ---------------- 相机 / 投影 ---------------- */
-  var cam = { az: -1.02, el: 0.30, dist: 3.75, zoom: 1, auto: true, autoRate: 0.055 };
+  var cam = { az: -1.02, el: 0.62, dist: 3.75, zoom: 1, auto: false, autoRate: 0.055 };
   var view = { w: 1280, h: 720, cx: 640, cy: 360, focal: 800, dist: 3.75,
                eye: [0, 0, 0], f: [0, 0, -1], r: [1, 0, 0], u: [0, 1, 0] };
 
@@ -90,12 +94,12 @@ function createApp(canvas, doc, win) {
   var CFG = { stepsPerOrbit: 1800, histStride: 12, histMax: 12000, recentMax: 1800 };
   var S = {
     t: 0, steps: 0, r: [1, 0, 0], v: [0, 1, 0],
-    B: 0.04, Btarget: 0.04, thetaDeg: 60, theta: 60 * DEG,
-    L: [0, 0, 1], Lmag: 1, rmag: 1,
+    B: 0.04, Btarget: 0.04, thetaDeg: 30, theta: 30 * DEG,
+    L: [0, 0, 1], Lmag: 1, rmag: 1, L0: [0, 0, 1],
     phiPrev: null, phiAcc: 0, wMeas: 0,
     E0: -0.5, dE: 0,
     hist: [], recent: [],
-    paused: false, speed: 2.2, trailFrac: 0.7, showGlow: true
+    paused: false, speed: 2.2, trailFrac: 0.0, showGlow: true
   };
   var STAR = [];
 
@@ -117,6 +121,7 @@ function createApp(canvas, doc, win) {
     S.E0 = PH.energy(st); S.dE = 0;
     S.hist.length = 0; S.recent.length = 0;
     S.L = PH.angularMomentum(st); S.Lmag = V.len(S.L); S.rmag = PH.radius(st);
+    S.L0 = V.unit(S.L);                       /* 进动起始方向, 用于画"原轨道面"鬼影 */
   }
 
   /* ---------------- 推进物理 ---------------- */
@@ -325,11 +330,21 @@ function createApp(canvas, doc, win) {
       }
       ctx.fillStyle = rgba(COL.field, 0.14 + 0.09 * i); ctx.fill();
     }
-    /* B 轴箭头 + 标签 */
+    /* B 轴箭头 + 标签 (显式标出这就是 Z 轴) */
     var pt = project([0, 0, 2.05]);
     if (pt.vis) {
       sprite(pt.x, pt.y, 22, COL.axis, 0.42);
-      text('B', pt.x + 16, pt.y - 14, 20, rgba(COL.axis, 0.95), 'left', true);
+      text('Z', pt.x + 15, pt.y - 12, 21, rgba(COL.axis, 0.98), 'left', true);
+      text('B \u2225 Z', pt.x + 15, pt.y + 10, 14, rgba(COL.axis, 0.75), 'left', false);
+    }
+    /* 坐标轴 X / Y (赤道面内), 给"绕 Z 转"一个绝对参考 */
+    if (ui.axes) {
+      var LA = 1.40, k2, ax = [[[-LA, 0, 0], [LA, 0, 0], 'X'], [[0, -LA, 0], [0, LA, 0], 'Y']];
+      for (k2 = 0; k2 < 2; k2++) {
+        polyAll(ax[k2], COL.xyz, 0.22, 1);
+        var q = project(ax[k2][1]);
+        if (q.vis) text(ax[k2][2], q.x + 7, q.y - 7, 14, rgba(COL.xyz, 0.78), 'left', false);
+      }
     }
   }
 
@@ -348,7 +363,7 @@ function createApp(canvas, doc, win) {
       for (b = 0; b < NB; b++) {           /* 亮芯 */
         i0 = Math.floor(n * b / NB); i1 = Math.floor(n * (b + 1) / NB);
         age = (b + 0.5) / NB;
-        strokeRange(S.hist, i0, i1, decC, COL.trailA, 0.022 + 0.32 * Math.pow(age, 2.8), 0.35 + 1.1 * age);
+        strokeRange(S.hist, i0, i1, decC, COL.trailA, 0.012 + 0.40 * Math.pow(age, 3.2), 0.35 + 1.2 * age);
         if (b >= NB - 4) strokeRange(S.hist, i0, i1, 1, COL.trailB, 0.09 + 0.20 * (b - NB + 4) / 4, 0.25 + 0.5 * age);
       }
     }
@@ -359,6 +374,67 @@ function createApp(canvas, doc, win) {
       strokeRange(S.recent, 0, m, 1, COL.trailB, 0.62, 2.1);
       strokeRange(S.recent, 0, m, 1, COL.white, 0.95, 1.0);
     }
+  }
+
+  /* 原轨道面鬼影: 让"相对于开始转过了多少"看得见 */
+  function drawGhostOrbit() {
+    if (!ui.ghost) return;
+    var b = basis(S.L0), u = b[1], w = b[2];
+    var R = S.rmag, pts = [], i, a2;
+    for (i = 0; i <= 72; i++) { a2 = i / 72 * TAU; pts.push(V.add(V.mul(u, R * Math.cos(a2)), V.mul(w, R * Math.sin(a2)))); }
+    if (ctx.setLineDash) ctx.setLineDash([6, 8]);
+    polyAll(pts, COL.ghost, 0.40, 1.3);
+    if (ctx.setLineDash) ctx.setLineDash([]);
+  }
+
+  /* ============ 进动相位盘: 让"绕 Z 轴匀速转动"成为画面最明确的信息 ============ */
+  function drawPrecessionDial() {
+    if (!ui.dial) return;
+    var a = V.unit(S.L), len = 1.55;
+    var zL = len * a[2];
+    var rL = Math.hypot(len * a[0], len * a[1]);
+    if (rL < 0.05) return;
+    var i, N = 96, pts = [], ph;
+
+    /* L 矢端的水平轨迹圆 (= 进动锥的边沿) */
+    for (i = 0; i <= N; i++) { ph = i / N * TAU; pts.push([rL * Math.cos(ph), rL * Math.sin(ph), zL]); }
+    polyAll(pts, COL.dial, 0.34, 1.2);
+    polyAll(pts, COL.dial, 0.055, 8);
+
+    /* 残影弧: 从当前相位往回 1.5π, 分 4 段渐隐 —— 直接读出转向和快慢 */
+    var ph0 = Math.atan2(a[1], a[0]), seg, K = 14;
+    for (seg = 0; seg < 4; seg++) {
+      var f0 = seg / 4, f1 = (seg + 1) / 4, arc = [];
+      for (i = 0; i <= K; i++) {
+        var f = f0 + (f1 - f0) * i / K;
+        var p2 = ph0 - f * Math.PI * 1.5;
+        arc.push([rL * Math.cos(p2), rL * Math.sin(p2), zL]);
+      }
+      arc.reverse();
+      polyAll(arc, COL.dialA, 0.60 * (1 - seg / 4.6), 2.8 - seg * 0.55);
+    }
+
+    /* 相位半径: 从 Z 轴上的一点拉到 L 矢端 */
+    var tip = V.mul(a, len);
+    polyAll([[0, 0, zL], tip], COL.dial, 0.40, 1.2);
+
+    /* 切向箭头 + ω_L 标签, 指明绕 Z 的转向 */
+    var phA = ph0 + 0.50;
+    var pa = [rL * Math.cos(phA), rL * Math.sin(phA), zL];
+    var pb = V.add(pa, [-0.20 * Math.sin(phA), 0.20 * Math.cos(phA), 0]);
+    var pA = project(pa), pB = project(pb);
+    if (pA.vis && pB.vis) {
+      var dx = pB.x - pA.x, dy = pB.y - pA.y, dl = Math.hypot(dx, dy) || 1; dx /= dl; dy /= dl;
+      ctx.beginPath();
+      ctx.moveTo(pA.x + dx * 9, pA.y + dy * 9);
+      ctx.lineTo(pA.x - dx * 3 - dy * 5.5, pA.y - dy * 3 + dx * 5.5);
+      ctx.lineTo(pA.x - dx * 3 + dy * 5.5, pA.y - dy * 3 - dx * 5.5);
+      ctx.closePath(); ctx.fillStyle = rgba(COL.dialA, 0.95); ctx.fill();
+      text('\u03c9_L', pA.x + dx * 18 + 2, pA.y + dy * 18 - 8, 15, rgba(COL.dialA, 0.95), 'left', true);
+    }
+
+    var pt = project(tip);
+    if (pt.vis) sprite(pt.x, pt.y, 20, COL.dialA, 0.5);
   }
 
   function drawOrbit() {
@@ -520,9 +596,11 @@ function createApp(canvas, doc, win) {
     ctx.lineCap = 'round';
     if (ui.sphere) drawSphereAndBand();
     drawField();
+    drawGhostOrbit();
     drawTrail();
     drawOrbit();
     drawVectors();
+    drawPrecessionDial();
     drawElectron();
     ctx.globalCompositeOperation = 'source-over';
     if (ui.burn) drawOverlay();
@@ -531,7 +609,8 @@ function createApp(canvas, doc, win) {
   /* ============================ UI ============================ */
   var ui = {
     sphere: true, band: true, cone: true, coneA: 0.85, mu: true, spin: false,
-    field: true, trail: true, auto: true, burn: false
+    field: true, trail: true, auto: false, burn: false,
+    axes: true, dial: true, ghost: true
   };
   var el = {};
   function need(id) { var e = doc.getElementById(id); if (!e) throw new Error('missing element #' + id); return e; }
@@ -542,7 +621,8 @@ function createApp(canvas, doc, win) {
     ['r-ratio', 'r-theta', 'r-speed', 'r-trail',
      'c-sphere', 'c-band', 'c-cone', 'c-mu', 'c-spin', 'c-field', 'c-trail', 'c-auto',
      'b-pause', 'b-reset', 'b-cam', 'b-png', 'l-ratio', 'l-speed',
-     'r-res', 'r-fps', 'r-dur', 'c-reset', 'c-burn', 'b-rec', 'v-rec', 'v-recbar'
+     'r-res', 'r-fps', 'r-dur', 'c-reset', 'c-burn', 'b-rec', 'v-rec', 'v-recbar',
+     'c-axes', 'c-dial', 'c-ghost', 'b-v1', 'b-v2', 'b-v3'
     ].forEach(function (id) { el[id] = need(id); });
 
     el['r-ratio'].value = (S.Btarget / 2).toFixed(3);
@@ -570,6 +650,16 @@ function createApp(canvas, doc, win) {
     bindChk('c-sphere', 'sphere'); bindChk('c-band', 'band'); bindChk('c-cone', 'cone');
     bindChk('c-mu', 'mu'); bindChk('c-spin', 'spin'); bindChk('c-field', 'field');
     bindChk('c-trail', 'trail'); bindChk('c-auto', 'auto');
+    bindChk('c-axes', 'axes'); bindChk('c-dial', 'dial'); bindChk('c-ghost', 'ghost');
+
+    /* 视角预设: 侧视 / 45° 俯视 / 沿 Z 俯视 */
+    function setCam(az, el2, zm) {
+      cam.az = az; cam.el = el2; if (zm) cam.zoom = zm;
+      ui.auto = false; if (el['c-auto']) el['c-auto'].checked = false;
+    }
+    el['b-v1'].addEventListener('click', function () { setCam(-1.02, 0.10, 1); });
+    el['b-v2'].addEventListener('click', function () { setCam(-1.02, 0.62, 1); });
+    el['b-v3'].addEventListener('click', function () { setCam(-1.02, 1.32, 1); });
 
     el['b-pause'].addEventListener('click', function () {
       S.paused = !S.paused;
@@ -890,6 +980,7 @@ if (typeof document !== 'undefined' && typeof window !== 'undefined' && document
     setChk(P.off, false);
     if (P.theta !== undefined) { app.state.thetaDeg = parseFloat(P.theta); app.state.theta = app.state.thetaDeg * Math.PI / 180; }
     if (P.ratio !== undefined) { app.state.Btarget = 2 * parseFloat(P.ratio); app.state.B = app.state.Btarget; }
+    if (P.trail !== undefined) app.state.trailFrac = Math.max(0, Math.min(1, parseFloat(P.trail) / 100));
 
     function fit() { app.resize(window.innerWidth, window.innerHeight); }
     window.addEventListener('resize', fit);

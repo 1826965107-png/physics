@@ -113,6 +113,27 @@ console.log(' [解读] 相对偏差随 B 线性增长, 但 偏差/omega_L^2 近�
 console.log('        ==> 实测 omega_L = (B/2)(1 + 0.25*B), 偏差是 O(B^2) 修正,');
 console.log('            这正说明拉莫尔定理 omega_L = eB/2m 是"一阶精确"的。');
 console.log('');
+
+/* ---- 演示默认角度 theta = 30 deg 的同样检验 ---- */
+console.log(' ===== 同样的检验 @ theta = 30 deg (演示默认倾角) =====');
+console.log(' omega_L/omega_0 |   实测 omega_L |    理论 B/2 |   相对偏差 |  偏差/omega_L^2 |  能量漂移');
+console.log('-----------------+----------------+-------------+-----------+-----------------+----------');
+const rows30 = [];
+for (const rw of [0.005, 0.01, 0.02, 0.04]) {
+  const m = measure(rw, 30, 2, 1200);
+  rows30.push(m);
+  console.log(' ' + rw.toFixed(4).padStart(15) +
+    ' | ' + m.wMeas.toFixed(9).padStart(14) +
+    ' | ' + m.wL.toFixed(9).padStart(11) +
+    ' | ' + (m.relErr * 100).toFixed(4).padStart(8) + '%' +
+    ' | ' + m.dOverW2.toFixed(4).padStart(15) +
+    ' | ' + m.dE.toExponential(1).padStart(9));
+}
+console.log('');
+console.log(' [解读] 偏差/omega_L^2 在 theta = 30 deg 时恒定在 ~0.43 (theta = 60 deg 时是 ~0.25)。');
+console.log('        O(B^2) 前面的系数依赖倾角 theta, 但"偏差是 O(B^2)"这一点与 theta 无关,');
+console.log('        所以拉莫尔定理 omega_L = eB/2m 在任何倾角下都是一阶精确的。');
+console.log('');
 console.log(' ===== 拉莫尔定理直接检验 (theta = 60 deg, 固定 50 圈公转窗口) =====');
 console.log(' 旋转系(Omega = omega_L 绕 B)中, 数值轨迹 vs B=0 解析圆轨道');
 console.log('');

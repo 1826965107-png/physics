@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>拉莫尔进动 · Larmor Precession 3D</title>
+<style>
+  :root{
+    --amber:#ffbe4a; --magenta:#ff5ca2; --violet:#b08aff; --mint:#96f6c4;
+    --cyan:#5ab6ff; --ice:#dff3ff; --dim:#7f93b5; --line:rgba(120,170,255,.16);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden;background:#010206}
+  body{
+    font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,"Helvetica Neue","Microsoft YaHei",sans-serif;
+    color:#dbe7fb; -webkit-font-smoothing:antialiased;
+  }
+  #gl{position:fixed;inset:0;display:block;width:100%;height:100%}
+  .panel{
+    position:fixed;z-index:5;
+    background:linear-gradient(160deg,rgba(12,20,38,.82),rgba(6,10,20,.72));
+    border:1px solid var(--line);
+    border-radius:14px;
+    backdrop-filter:blur(14px) saturate(1.25);
+    -webkit-backdrop-filter:blur(14px) saturate(1.25);
+    box-shadow:0 18px 50px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.05);
+  }
+  #left{left:18px;top:18px;width:342px;padding:16px 16px 13px;
+    max-height:calc(100vh - 36px);overflow-y:auto;scrollbar-width:thin}
+  #right{right:18px;top:18px;width:284px;padding:14px 16px 16px;
+    max-height:calc(100vh - 36px);overflow-y:auto;scrollbar-width:thin}
+  #left::-webkit-scrollbar,#right::-webkit-scrollbar{width:5px}
+  #left::-webkit-scrollbar-thumb,#right::-webkit-scrollbar-thumb{
+    background:rgba(120,170,255,.25);border-radius:3px}
+  h1{
+    font-size:16.5px;font-weight:650;letter-spacing:.3px;line-height:1.25;
+    background:linear-gradient(92deg,#fff 10%,var(--amber) 55%,var(--magenta) 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+  }
+  h1 small{display:block;font-size:10.5px;font-weight:500;letter-spacing:1.6px;
+    color:#7f93b5;margin-top:3px;-webkit-text-fill-color:#7f93b5}
+  .formula{
+    margin:10px 0 11px;padding:8px 10px;border-radius:9px;
+    background:rgba(90,182,255,.07);border:1px solid rgba(90,182,255,.18);
+    font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;
+    font-size:13.5px;color:#bfe0ff;letter-spacing:.2px;text-align:center;
+  }
+  .formula b{color:#fff;font-weight:600}
+  .sec{margin:11px 0 6px;font-size:10px;letter-spacing:1.7px;color:#63779a;
+    text-transform:uppercase;font-weight:600}
+  .row{display:flex;justify-content:space-between;align-items:baseline;
+    padding:2.5px 0;font-size:12.2px;gap:10px}
+  .row .k{color:#8ea3c4;white-space:nowrap}
+  .row .v{font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;
+    font-size:12.4px;color:#eaf3ff;font-weight:500;text-align:right;
+    font-variant-numeric:tabular-nums}
+  .v.hot{color:var(--amber)} .v.cy{color:var(--cyan)} .v.mg{color:var(--magenta)}
+  .v.mi{color:var(--mint)} .v.vi{color:var(--violet)}
+  hr{border:0;border-top:1px solid var(--line);margin:10px 0 8px}
+  .note{font-size:10.6px;line-height:1.55;color:#7186a8;margin-top:8px}
+  .note b{color:#9fb6d8;font-weight:600}
+  label.ctl{display:block;margin:9px 0 3px;font-size:11.5px;color:#9db2d4;
+    display:flex;justify-content:space-between;align-items:baseline}
+  label.ctl span{font-family:ui-monospace,Consolas,monospace;color:#e6f0ff;font-size:11.5px}
+  input[type=range]{width:100%;height:4px;-webkit-appearance:none;appearance:none;
+    background:linear-gradient(90deg,rgba(90,182,255,.55),rgba(255,92,162,.5));
+    border-radius:3px;outline:none;margin:2px 0 1px}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;
+    border-radius:50%;background:#eaf4ff;border:2px solid #5ab6ff;cursor:pointer;
+    box-shadow:0 0 10px rgba(90,182,255,.8)}
+  input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;
+    background:#eaf4ff;border:2px solid #5ab6ff;cursor:pointer}
+  .checks{display:grid;grid-template-columns:1fr 1fr;gap:5px 8px;margin-top:10px}
+  .checks label{display:flex;align-items:center;gap:6px;font-size:11.5px;color:#a8bcd9;cursor:pointer}
+  .checks input{accent-color:#5ab6ff;width:13px;height:13px;cursor:pointer}
+  .btns{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:12px}
+  button{
+    font-family:inherit;font-size:11.8px;color:#dceaff;cursor:pointer;
+    background:linear-gradient(180deg,rgba(90,182,255,.16),rgba(90,182,255,.07));
+    border:1px solid rgba(120,180,255,.28);border-radius:8px;padding:7px 6px;
+    transition:.15s;font-weight:500}
+  button:hover{background:linear-gradient(180deg,rgba(90,182,255,.30),rgba(90,182,255,.14));
+    border-color:rgba(150,210,255,.55);transform:translateY(-1px)}
+  button:active{transform:translateY(0)}
+  button.recording{background:linear-gradient(180deg,rgba(255,92,138,.34),rgba(255,92,138,.15));
+    border-color:rgba(255,140,170,.7);color:#ffe3ec}
+  select{width:100%;font-family:inherit;font-size:11.5px;color:#dceaff;cursor:pointer;
+    background:rgba(12,22,40,.92);border:1px solid rgba(120,180,255,.28);
+    border-radius:7px;padding:5px 7px;outline:none}
+  select:hover{border-color:rgba(150,210,255,.5)}
+  .rec-row{display:grid;grid-template-columns:1.3fr 1fr;gap:7px}
+  .bar{height:3px;border-radius:2px;background:rgba(120,170,255,.14);margin-top:7px;overflow:hidden}
+  .bar i{display:block;height:100%;width:0;border-radius:2px;
+    background:linear-gradient(90deg,#ff5c8a,#ffbe4a)}
+  .rec-status{font-size:10.6px;line-height:1.55;color:#8ea3c4;margin-top:6px;min-height:15px}
+  #hint{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:5;
+    font-size:11.5px;color:#6f84a6;background:rgba(6,10,20,.6);
+    border:1px solid var(--line);border-radius:20px;padding:6px 16px;
+    backdrop-filter:blur(8px);white-space:nowrap}
+  #hint b{color:#b9cdea;font-weight:600}
+  #legend{position:fixed;left:50%;bottom:52px;transform:translateX(-50%);z-index:5;
+    display:flex;gap:16px;font-size:11px;color:#8397b8;
+    background:rgba(6,10,20,.5);border:1px solid var(--line);
+    border-radius:20px;padding:5px 18px;backdrop-filter:blur(8px);white-space:nowrap}
+  #legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;
+    vertical-align:middle;transform:translateY(-1px)}
+  @media (max-width:1180px){
+    #left{width:300px;transform:scale(.92);transform-origin:top left}
+    #right{width:250px;transform:scale(.92);transform-origin:top right}
+    #legend{display:none}
+  }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<!-- ========== 左: 实时物理读数 ========== -->
+<div id="left" class="panel">
+  <h1>拉莫尔进动 · 3D<small>LARMOR PRECESSION · EXACT NUMERICAL DYNAMICS</small></h1>
+  <div class="formula">&omega;<sub>L</sub> = <b>(e/2m)·B</b> &nbsp;=&nbsp; B/2 &nbsp;(原子单位)</div>
+
+  <div class="sec">运动学</div>
+  <div class="row"><span class="k">&omega;<sub>L</sub> / &omega;<sub>0</sub></span><span class="v cy" id="v-ratio">—</span></div>
+  <div class="row"><span class="k">已公转圈数</span><span class="v" id="v-orbits">—</span></div>
+  <div class="row"><span class="k">L 已进动角</span><span class="v hot" id="v-precess">—</span></div>
+  <div class="row"><span class="k">θ = ∠(L, B)</span><span class="v" id="v-theta">—</span></div>
+  <div class="row"><span class="k">|L| (ħ)</span><span class="v" id="v-Lmag">—</span></div>
+  <div class="row"><span class="k">r (a₀)</span><span class="v" id="v-rmag">—</span></div>
+  <div class="row"><span class="k">能量漂移 |ΔE/E|</span><span class="v mi" id="v-dE">—</span></div>
+
+  <hr>
+  <div class="sec">进动频率: 实测 vs 理论</div>
+  <div class="row"><span class="k">&omega;<sub>L</sub> 实测</span><span class="v cy" id="v-wmeas">—</span></div>
+  <div class="row"><span class="k">&omega;<sub>L</sub> 理论 B/2</span><span class="v" id="v-wtheo">—</span></div>
+  <div class="row"><span class="k">相对偏差</span><span class="v mg" id="v-werr">—</span></div>
+  <div class="row"><span class="k" id="v-werr2" style="font-size:10.6px;color:#7d93b5">—</span></div>
+
+  <hr>
+  <div class="sec">等价真实世界</div>
+  <div class="row"><span class="k">磁场 B</span><span class="v mi" id="v-bre">—</span></div>
+  <div class="row"><span class="k">&omega;<sub>L</sub>/2π</span><span class="v" id="v-bghz">—</span></div>
+  <div class="row"><span class="k">轨道塞曼分裂 μ<sub>B</sub>B</span><span class="v" id="v-zeeman">—</span></div>
+  <div class="row"><span class="k">进动 1 圈需公转</span><span class="v" id="v-optrun">—</span></div>
+  <div class="row"><span class="k">当前场 / 默认场</span><span class="v" id="v-mag">—</span></div>
+  <div class="row"><span class="k">真实 1 T 时 &omega;<sub>L</sub>/&omega;<sub>0</sub> / 圈数</span><span class="v" id="v-1T">—</span></div>
+
+  <div class="note">
+    <b>积分的是精确方程</b>：<span style="font-family:ui-monospace,Consolas,monospace">a = −r/|r|³ − v×B</span>，
+    对 B 不做任何展开，RK4 步长 2π/1800。进动是从积分里<b>涌现</b>的，不是硬塞的。
+  </div>
+  <div class="note" style="color:#67799a">
+    <b>为什么 |L| 略大于 1ħ</b>：取的是"有磁场时仍为圆形"的轨道（在 r = a₀ 处做径向力平衡），
+    速度被塞曼平移抬高了 (B/2)cosθ，所以 |L| = 1 + (B/2)cosθ。
+  </div>
+</div>
+
+<!-- ========== 右: 控制 ========== -->
+<div id="right" class="panel">
+  <div class="sec" style="margin-top:2px">控制台</div>
+
+  <label class="ctl">磁场强度 &omega;<sub>L</sub>/&omega;<sub>0</sub> <span id="l-ratio">0.020</span></label>
+  <input id="r-ratio" type="range" min="0.002" max="0.06" step="0.001" value="0.020">
+
+  <label class="ctl">轨道倾角 θ = ∠(L,B)</label>
+  <input id="r-theta" type="range" min="0" max="90" step="1" value="60">
+
+  <label class="ctl">播放速度 (圈/秒) <span id="l-speed">2.2</span></label>
+  <input id="r-speed" type="range" min="0.3" max="6" step="0.1" value="2.2">
+
+  <label class="ctl">轨迹长度</label>
+  <input id="r-trail" type="range" min="0" max="100" step="1" value="70">
+
+  <div class="checks">
+    <label><input type="checkbox" id="c-sphere" checked>参考球面</label>
+    <label><input type="checkbox" id="c-band" checked>球面带</label>
+    <label><input type="checkbox" id="c-cone" checked>对顶双锥</label>
+    <label><input type="checkbox" id="c-mu" checked>磁矩 μ</label>
+    <label><input type="checkbox" id="c-spin">自旋 S (2×)</label>
+    <label><input type="checkbox" id="c-field" checked>磁场线</label>
+    <label><input type="checkbox" id="c-trail" checked>电子轨迹</label>
+    <label><input type="checkbox" id="c-auto" checked>自动旋转</label>
+  </div>
+
+  <div class="btns">
+    <button id="b-pause">暂停 ⏸</button>
+    <button id="b-reset">重置 ⟲</button>
+    <button id="b-cam">视角复位</button>
+    <button id="b-png">保存 PNG</button>
+  </div>
+
+  <div class="sec" style="margin-top:15px">录制动画</div>
+  <div class="rec-row">
+    <select id="r-res">
+      <option value="1280x720">1280 × 720</option>
+      <option value="1920x1080" selected>1920 × 1080</option>
+      <option value="2560x1440">2560 × 1440</option>
+    </select>
+    <select id="r-fps">
+      <option value="30">30 fps</option>
+      <option value="60" selected>60 fps</option>
+    </select>
+  </div>
+  <select id="r-dur" style="margin-top:6px">
+    <option value="10">录 10 秒</option>
+    <option value="20" selected>录 20 秒</option>
+    <option value="30">录 30 秒</option>
+    <option value="60">录 60 秒</option>
+    <option value="loop">1 个进动周期（无缝循环）</option>
+  </select>
+  <div class="checks" style="margin-top:8px">
+    <label><input type="checkbox" id="c-reset" checked>录制前重置</label>
+    <label><input type="checkbox" id="c-burn">烧录标题数据</label>
+  </div>
+  <button id="b-rec" style="width:100%;margin-top:8px">● 开始录制</button>
+  <div class="bar"><i id="v-recbar"></i></div>
+  <div id="v-rec" class="rec-status"></div>
+  <div class="note">
+    录的是 <b>canvas 本身</b>，所以视频里<b>不会出现这些面板</b>；要标题/公式/数据就勾"烧录标题数据"。
+    选"1 个进动周期"且 ω<sub>L</sub>/ω<sub>0</sub> = 1/n（如默认 0.02 = 1/50）时首尾状态严格重合，可做<b>无缝循环</b>。
+  </div>
+
+  <div class="note">
+    <b>μ = −½L</b>（原子单位）：所以 μ 箭头严格画成 L 的一半长，
+    这不是示意，是真实的物理比例。两个圆锥因此是"等半顶角、不等斜高"的对顶双锥。
+  </div>
+</div>
+
+<div id="legend">
+  <span><i style="background:#ffbe4a"></i>L 角动量</span>
+  <span><i style="background:#ff5ca2"></i>μ 磁矩</span>
+  <span><i style="background:#96f6c4"></i>B 磁场</span>
+  <span><i style="background:#5ab6ff"></i>电子轨迹</span>
+  <span><i style="background:#96d6ff"></i>球面带包络</span>
+  <span><i style="background:#b08aff"></i>自旋 S</span>
+</div>
+<div id="hint">拖拽 <b>旋转视角</b> · 滚轮 <b>缩放</b> · 空格 <b>暂停</b> · R <b>重置</b> &nbsp;·&nbsp; <b id="v-fps">–</b> fps</div>
+
+<script src="physics.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

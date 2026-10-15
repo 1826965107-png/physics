@@ -1,0 +1,13 @@
+# 操作系统垃圾文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+
+# 临时输出（录制的视频、截图）
+*.webm
+*.mp4

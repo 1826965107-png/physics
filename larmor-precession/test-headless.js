@@ -261,6 +261,18 @@ const snapped = allowed.some(a => Math.abs(parseFloat(a) - tiltDeg()) < 1.0) ||
 if (!snapped) errors.push('开启量子化后轨道面没有落在允许值上: ' + tiltDeg().toFixed(2) + '°');
 else console.log('  → 轨道面已落在允许倾角上 ✓ (β = ' + tiltDeg().toFixed(1) + '°, 对应 m=' + app.state.mNow + ')');
 
+/* μ = -L/2 必须严格垂直于轨道面: 画出来的轨道环用法线 S.Ldraw, μ 也用 S.Ldraw,
+ * 所以二者必然垂直 —— 这里断言"绘制法线"与"物理轨道法线"也一致(同面或反向同面),
+ * 否则箭头会跟轨道环对不上。 */
+(function () {
+  const U = app.state.Ldraw, L = app.state.L;
+  const nu = Math.hypot(U[0], U[1], U[2]), nl = Math.hypot(L[0], L[1], L[2]);
+  const c = Math.abs((U[0] * L[0] + U[1] * L[1] + U[2] * L[2]) / (nu * nl));
+  const ang = Math.acos(Math.min(1, c)) * 180 / Math.PI;
+  console.log('  绘制法线 vs 物理轨道法线: ' + ang.toFixed(2) + '° (同面/反向同面则应接近 0)');
+  if (ang > 8) errors.push('画出来的箭头与轨道环不同面, μ 看起来不垂直于轨道面: ' + ang.toFixed(2) + '°');
+})();
+
 /* ---------------- 检查元素 id 与 index.html 一致 ---------------- */
 const appSrc = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
 const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');

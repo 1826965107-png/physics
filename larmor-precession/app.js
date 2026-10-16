@@ -182,8 +182,9 @@ function createApp(canvas, doc, win) {
     S.bp = Math.hypot(L[0], L[1]);                      /* 横向模 |L_⊥| */
     S.mz0 = -S.bz / lm;                                 /* 归一化纵向磁化 M_z/M_eq */
     S.mp0 = S.bp / lm;                                  /* 归一化横向磁化 */
-    S.betaCont = Math.atan2(S.bp, -S.bz);               /* 与平衡方向 -Z 的夹角 */
-    S.betaDisp = S.betaCont;
+    S.betaCont = Math.atan2(S.bp, -S.bz);               /* 有向: L 与平衡方向 -Z 的夹角 */
+    S.betaDisp = Math.min(S.betaCont, Math.PI - S.betaCont);  /* 无向: 轨道面的倾角 */
+    S.branch = (S.betaCont > Math.PI / 2) ? 1 : -1;
     S.mNow = S.quant ? mForBeta(S.betaCont, S.lq) : -1;
   }
   /* 由 T1 与纯退相位速率合成 T2:   1/T2 = 1/(2T1) + 1/T2' */
@@ -282,6 +283,9 @@ function createApp(canvas, doc, win) {
       S.betaDisp = pNow;              /* 都不开: 保持精确积分, 不动轨道面 */
     }
     S.mNow = S.quant ? mForBeta(S.betaCont, S.lq) : -1;
+    /* 有向分支: beta>90° 表示 L 在 +Z 一侧。用来把"无向的面倾角"还原成有向方向,
+     * 这样量子化 snap 之后 m 与画出来的锥仍然一一对应。 */
+    S.branch = (S.betaCont > Math.PI / 2) ? 1 : -1;
 
     /* 观测量 */
     var L = PH.angularMomentum(S);
@@ -291,16 +295,22 @@ function createApp(canvas, doc, win) {
     S.phiPrev = phi;
     S.L = L; S.Lmag = V.len(L); S.rmag = PH.radius(S);
     S.thetaNow = Math.acos(clamp(V.unit(L)[2], -1, 1));   /* 当前真实倾角 ∠(L, +Z) */
-    /* 绘制用的系综平均 ⟨L⟩: 方向取自布洛赫变量, 长度 ∝ |⟨L⟩|。
-     * 反转恢复(π 脉冲)时 |⟨L⟩| 会穿过 0 再反向长出来 —— 此时方向翻转 180°
-     * 但长度恰好为 0, 所以视觉上是"缩成一个点再长出来", 与布洛赫图像一致。 */
+    /* 绘制用矢量 S.Ldraw —— 它同时决定"箭头方向"和"轨道面法线", 二者必须共用同一个
+     * 法线, 否则画出来的 μ 就不垂直于画出来的轨道面 (μ = -L/2 是严格反平行的)。
+     * 方向由(可能已被量子化 snap 的)面倾角 + 有向分支重建; 长度 ∝ |⟨L⟩|,
+     * 所以反转恢复时箭头会缩成一个点再反向长出来。 */
     S.mag = 1;
-    S.Ldraw = V.unit(L);
-    if (S.relax) {
-      var rr = Math.hypot(S.bp, S.bz) || 1e-9;
-      var phd = Math.atan2(L[1], L[0]);
-      S.Ldraw = [S.bp * Math.cos(phd) / rr, S.bp * Math.sin(phd) / rr, S.bz / rr];
-      S.mag = rr / (S.L0mag || 1);
+    if (S.relax || S.quant) {
+      /* betaCont 是"与 -Z 的夹角", 而绘制方向要的是"与 +Z 的夹角":
+       *   branch=+1 (L 在 +Z 侧, beta>90): 与 +Z 夹角 = 面倾角
+       *   branch=-1 (L 在 -Z 侧, beta<90): 与 +Z 夹角 = 180 - 面倾角
+       * 两者在 beta=90 处连续对接, 分支切换不会有跳变。 */
+      var gam = (S.branch > 0) ? S.betaDisp : (Math.PI - S.betaDisp);
+      var azd = Math.atan2(L[1], L[0]);
+      S.Ldraw = [Math.sin(gam) * Math.cos(azd), Math.sin(gam) * Math.sin(azd), Math.cos(gam)];
+      S.mag = S.relax ? Math.hypot(S.bp, S.bz) / (S.L0mag || 1) : 1;
+    } else {
+      S.Ldraw = V.unit(L);
     }
     S.dE = Math.abs((PH.energy(S) - S.E0) / S.E0);
     S.wMeas = S.t > 4 ? S.phiAcc / S.t : S.B / 2;
@@ -447,9 +457,11 @@ function createApp(canvas, doc, win) {
     }
     strokeBatch(grid, COL.sphere, 0.105, 1);
 
-    /* 球面带: 电子轨迹的极角包络 [90-theta, 90+theta] */
+    /* 球面带: 电子轨迹的极角包络 [90-theta, 90+theta]。theta 必须用当前倾角,
+     * 否则弛豫时带子不跟着变。 */
     if (ui.band) {
-      var th1 = Math.PI / 2 - S.theta, th2 = Math.PI / 2 + S.theta;
+      var thB = (S.thetaNow === undefined) ? S.theta : S.thetaNow;
+      var th1 = Math.PI / 2 - thB, th2 = Math.PI / 2 + thB;
       var rings = [], edges = [], k;
       for (k = 0; k <= 14; k++) {
         var tt = th1 + (th2 - th1) * k / 14;
@@ -746,7 +758,9 @@ function createApp(canvas, doc, win) {
   }
 
   function drawOrbit() {
-    var n = V.unit(S.L), b = basis(n), u = b[1], w = b[2];
+    /* 法线必须与 drawVectors 画箭头用的是同一个 (S.Ldraw),
+     * 否则 μ 看起来不垂直于轨道面。 */
+    var n = V.unit(S.Ldraw || S.L), b = basis(n), u = b[1], w = b[2];
     var R = S.rmag, pts = [], i, a2;
     for (i = 0; i <= 96; i++) { a2 = i / 96 * TAU; pts.push(V.add(V.mul(u, R * Math.cos(a2)), V.mul(w, R * Math.sin(a2)))); }
     /* 极淡的轨道面 */

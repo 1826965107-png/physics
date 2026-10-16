@@ -24,7 +24,9 @@ dv/dt = − r/|r|³  −  v × B        （原子单位，RK4，每圈公转 180
 
 ![弛豫：对顶双锥单调收口，L 落向 −Z、μ 落向 +Z](larmor-precession/preview-4-relax.jpg)
 
-![空间量子化：只剩 2l+1 个允许锥](larmor-precession/preview-5-quant.jpg)
+![反转恢复（π 脉冲）：M_z 穿过 0，|M⊥| 全程为 0](larmor-precession/preview-5-inversion.jpg)
+
+![空间量子化：只剩 2l+1 个允许锥](larmor-precession/preview-6-quant.jpg)
 
 ![把轨迹拉长就是"毛线球"](larmor-precession/preview-3-wool.jpg)
 

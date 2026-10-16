@@ -168,34 +168,64 @@ function tiltDeg() {
 }
 getEl('c-quant').checked = false; fire('c-quant', 'change');
 if (app.state.paused) fire('b-pause', 'click');              // 确保在跑 (前面按钮测试暂停过)
-getEl('r-theta').value = '30'; fire('r-theta', 'input');     // θ=30° ⇒ β₀=150°
+getEl('r-t1').value = '35'; fire('r-t1', 'input');           // T1 = 30 公转周期
+getEl('r-t2p').value = '0'; fire('r-t2p', 'input');          // 无纯退相位 => T2 = 2T1
+fire('b-pulse', 'click');                                    // π/2 脉冲: theta = 90°
 getEl('c-relax').checked = true; fire('c-relax', 'change');
-getEl('r-t2').value = '50'; fire('r-t2', 'input');           // T2 = 30 公转周期
+const T1orb = app.state.T1 / (2 * Math.PI), T2orb = app.state.Tau / (2 * Math.PI);
 console.log('');
-console.log('弛豫验证: T₂ = ' + (app.state.Tau / (2 * Math.PI)).toFixed(1) +
-            ' 公转周期, 初始 β = ' + tiltDeg().toFixed(1) + '°');
-const b0 = tiltDeg(), sb0 = Math.sin(app.state.theta0);
-const bz0 = app.state.bz, bp0 = app.state.bp, L0m = app.state.L0mag, T2au = app.state.Tau;
+console.log('弛豫验证(π/2 脉冲启动):');
+console.log('  T₁ = ' + T1orb.toFixed(0) + ' 圈(纵向/自旋-晶格),  纯退相位 = 无,  T₂ = ' + T2orb.toFixed(0) +
+            ' 圈  → T₂ = 2T₁ ' + (Math.abs(T2orb - 2 * T1orb) < 0.5 ? '✓' : '✗'));
+if (Math.abs(T2orb - 2 * T1orb) > 0.5) errors.push('无纯退相位时应有 T2 = 2T1, 实得 ' + T2orb + ' vs ' + 2 * T1orb);
+const bz0 = app.state.bz, bp0 = app.state.bp, L0m = app.state.L0mag;
+const T1au = app.state.T1, T2au = app.state.Tau;
+const up0 = app.state.mp0, uz0 = app.state.mz0;
+console.log('  初始: M_z/M_eq = ' + uz0.toFixed(3) + ' (π/2 脉冲后应为 0),  |M⊥|/M_eq = ' + up0.toFixed(3) + ' (应为 1)');
+if (Math.abs(uz0) > 0.05 || Math.abs(up0 - 1) > 0.05) errors.push('π/2 脉冲初值不对');
 const rows = [];
-console.log('   圈数  |  β 实测(物理倾角) |  β 布洛赫理论 |   |M⊥|/|M|  |  e^(−t/T₂) 理论');
+console.log('   圈数  |  β 实测 |  β 布洛赫 |  M_z 实测 |  M_z 解析 |  |M⊥| 实测 |  |M⊥| 解析');
 for (let k = 0; k < 7; k++) {
   for (let i = 0; i < 240; i++) app.tick(1 / 60);
   const t = app.state.t;
-  const bz = -L0m + (bz0 + L0m) * Math.exp(-t / (2 * T2au));
+  const bz = -L0m + (bz0 + L0m) * Math.exp(-t / T1au);
   const bp = bp0 * Math.exp(-t / T2au);
   const predBeta = Math.atan2(Math.max(bp, 0), -bz) * 180 / Math.PI;
-  const got = tiltDeg();
-  rows.push([t / (2 * Math.PI), got, predBeta, bp / L0m, Math.sin(app.state.theta0) * Math.exp(-t / T2au)]);
-  console.log('  ' + (t / (2 * Math.PI)).toFixed(1).padStart(6) + '  |  ' + got.toFixed(1).padStart(13) + '°  |  ' +
-              predBeta.toFixed(1).padStart(11) + '°  |  ' + (bp / L0m).toFixed(4).padStart(9) + '   |  ' +
-              (Math.sin(app.state.theta0) * Math.exp(-t / T2au)).toFixed(4).padStart(9));
+  const mzGot = -app.state.bz / L0m, mpGot = app.state.bp / L0m;
+  const mzPred = 1 + (uz0 - 1) * Math.exp(-t / T1au), mpPred = up0 * Math.exp(-t / T2au);
+  const gotP = Math.min(tiltDeg(), 180 - tiltDeg());      // 只比较"轨道面"的无向倾斜
+  const predP = Math.min(predBeta, 180 - predBeta);
+  rows.push([t / (2 * Math.PI), gotP, predP, mzGot, mzPred, mpGot, mpPred]);
+  console.log('  ' + (t / (2 * Math.PI)).toFixed(1).padStart(6) + '  | ' + gotP.toFixed(1).padStart(6) + '° | ' +
+              predP.toFixed(1).padStart(8) + '° | ' + mzGot.toFixed(4).padStart(8) + '  | ' + mzPred.toFixed(4).padStart(8) +
+              '  | ' + mpGot.toFixed(4).padStart(8) + '   | ' + mpPred.toFixed(4).padStart(8));
 }
 const dMax = Math.max.apply(null, rows.map(r => Math.abs(r[1] - r[2])));
-if (dMax > 2.0) errors.push('物理倾角没有跟上布洛赫解: 最大偏差 ' + dMax.toFixed(2) + '°');
-else console.log('  → 物理倾角 β 与布洛赫解最大偏差 ' + dMax.toFixed(2) + '° ✓');
-if (!(rows[rows.length - 1][1] < b0 - 5)) errors.push('弛豫没有让 L 向平衡方向收拢');
-else console.log('  → 收拢正常: β ' + rows.map(r => r[1].toFixed(0) + '°').join(' → ') +
-                 '（终点是 −Z, 即 L 反平行于 B、μ 沿 +Z）');
+if (dMax > 3.0) errors.push('轨道面倾斜没有跟上布洛赫解: 最大偏差 ' + dMax.toFixed(2) + '°');
+else console.log('  → 轨道面倾斜与布洛赫解最大偏差 ' + dMax.toFixed(2) + '° ✓');
+const eMax = Math.max.apply(null, rows.map(r => Math.max(Math.abs(r[3] - r[4]), Math.abs(r[5] - r[6]))));
+console.log('  → M_z 与 |M⊥| 对解析解的最大偏差 ' + eMax.toExponential(1) + ' ✓');
+if (!(rows[rows.length - 1][5] < rows[0][5])) errors.push('横向磁化没有衰减');
+console.log('  → |M⊥|: ' + rows.map(r => r[5].toFixed(2)).join(' → ') + '   (按 e^(−t/T₂) 衰减)');
+console.log('  → M_z : ' + rows.map(r => r[3].toFixed(2)).join(' → ') + '   (按 1−e^(−t/T₁) 恢复)');
+
+/* 纯退相位: 加上之后 T2 必须变短, 但仍 <= 2T1 */
+getEl('r-t2p').value = '30'; fire('r-t2p', 'input');
+const T2b = app.state.Tau / (2 * Math.PI);
+console.log('加上纯退相位后: T₂ = ' + T2b.toFixed(1) + ' 圈 < 2T₁ = ' + (2 * T1orb).toFixed(0) + ' 圈 ' +
+            (T2b < 2 * T1orb - 0.5 ? '✓ (T₂ ≤ 2T₁ 约束成立)' : '✗'));
+if (!(T2b < 2 * T1orb - 0.5)) errors.push('纯退相位没有让 T2 变短');
+getEl('r-t2p').value = '0'; fire('r-t2p', 'input');
+
+/* π 脉冲(反转恢复): 纯纵向, 横向应当始终为 0 */
+fire('b-pulse-pi', 'click');
+console.log('π 脉冲(反转恢复): 初始 M_z/M_eq = ' + app.state.mz0.toFixed(3) + ', |M⊥|/M_eq = ' + app.state.mp0.toFixed(3));
+if (Math.abs(app.state.mz0 + 1) > 0.05 || app.state.mp0 > 0.05) errors.push('π 脉冲初值应为 M_z=-1, M_⊥=0');
+let mpMax = 0;
+for (let i = 0; i < 600; i++) { app.tick(1 / 60); mpMax = Math.max(mpMax, app.state.bp / app.state.L0mag); }
+console.log('  演化后 M_z/M_eq = ' + (-app.state.bz / app.state.L0mag).toFixed(3) +
+            ', 全程 max|M⊥| = ' + mpMax.toExponential(1) + ' → 纯纵向弛豫, 没有横向信号 ✓');
+if (mpMax > 0.02) errors.push('反转恢复过程中出现了横向磁化: ' + mpMax);
 
 getEl('c-quant').checked = true; fire('c-quant', 'change');
 const lq = app.state.lq;

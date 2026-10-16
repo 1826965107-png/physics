@@ -103,9 +103,17 @@ function createApp(canvas, doc, win) {
     E0: -0.5, dE: 0,
     hist: [], recent: [],
     paused: false, speed: 2.2, trailFrac: 0.0, showGlow: true,
-    /* --- 弛豫 (布洛赫唯象阻尼) --- */
-    relax: false, Tau: 30 * TAU,        /* T2: 横向相干衰减时间 (a.u.) */
-    bz: 0, bp: 0, L0mag: 1,             /* 纵向分量 L_z 与横向模 |L_⊥| (布洛赫变量) */
+    /* --- 弛豫 (布洛赫唯象阻尼) ---
+     * 两个独立的物理过程:
+     *   T1  (纵向/自旋-晶格): 需要把 ħω_L 交给热库, 让 M_z 回到平衡
+     *   T2' (纯退相位):        只打乱相位, 不交换能量
+     * 二者合成横向弛豫:   1/T2 = 1/(2T1) + 1/T2'   ==>  T2 <= 2T1
+     */
+    relax: false,
+    T1: 20 * TAU,                       /* 纵向弛豫时间 (a.u.) */
+    rate2p: 0,                          /* 纯退相位速率 1/T2' (1/a.u.), 0 = 无 */
+    Tau: 40 * TAU,                      /* 由上面两者合成的 T2 */
+    bz: 0, bp: 0, L0mag: 1, mz0: 0, mp0: 1,
     betaCont: 0, betaDisp: 0,           /* 目标倾角(连续) / 实际驱动倾角 */
     /* --- 空间量子化 --- */
     quant: false, lq: 2,
@@ -172,36 +180,54 @@ function createApp(canvas, doc, win) {
     S.L0mag = lm;
     S.bz = L[2];                                        /* 纵向分量 L_z */
     S.bp = Math.hypot(L[0], L[1]);                      /* 横向模 |L_⊥| */
+    S.mz0 = -S.bz / lm;                                 /* 归一化纵向磁化 M_z/M_eq */
+    S.mp0 = S.bp / lm;                                  /* 归一化横向磁化 */
     S.betaCont = Math.atan2(S.bp, -S.bz);               /* 与平衡方向 -Z 的夹角 */
     S.betaDisp = S.betaCont;
     S.mNow = S.quant ? mForBeta(S.betaCont, S.lq) : -1;
   }
+  /* 由 T1 与纯退相位速率合成 T2:   1/T2 = 1/(2T1) + 1/T2' */
+  function recomputeT2() {
+    S.Tau = 1 / (1 / (2 * Math.max(S.T1, 1e-6)) + Math.max(S.rate2p, 0));
+  }
   /* 完整布洛赫方程组 (对磁矩 mu ∝ -L 写, 所以纵向平衡是 L_z = -|L|):
-   *     L_z(t) = L_eq + (L_z(0) - L_eq) · e^(-t/T1)      T1 纵向恢复
-   *     |L_⊥|(t) = |L_⊥|(0) · e^(-t/T2)                  T2 横向退相位
-   * 这个 |L_⊥| 就是磁共振测到的横向磁化, 也就是 FID 包络。 */
+   *     M_z(t)    = M_eq + (M_z(0) - M_eq) · e^(-t/T1)      T1 纵向恢复
+   *     |M_⊥|(t)  = |M_⊥|(0) · e^(-t/T2)                    T2 横向退相位
+   * 这个 |M_⊥| 就是磁共振测到的横向磁化, 也就是 FID 包络。 */
   function blochStep(dt) {
-    var T2 = Math.max(S.Tau, 1e-6), T1 = 2 * T2;
+    var T1 = Math.max(S.T1, 1e-6), T2 = Math.max(S.Tau, 1e-6);
     S.bz = -S.L0mag + (S.bz + S.L0mag) * Math.exp(-dt / T1);
     S.bp *= Math.exp(-dt / T2);
-    S.betaCont = Math.atan2(Math.max(S.bp, 0), -S.bz);  /* 与 -Z 的夹角, 从 150° 单调走到 0° */
+    S.betaCont = Math.atan2(Math.max(S.bp, 0), -S.bz);  /* 与 -Z 的夹角 */
   }
-  /* 把轨道面绕当前 r 方向转一个小角度, 使 L 与 -Z 的夹角趋近 betaDisp。
-   * 绕 r 旋转 v 时 |v| 与 |r| 都不变 (能量守恒), 轨道形状不变, 只有轨道面在倾斜。 */
+  /* 把轨道面绕当前 r 方向转一个小角度, 使"轨道面的倾斜"趋近 betaDisp。
+   *
+   * 关键: cos(psi + delta) = A·cos(delta) + C·sin(delta), 其中 A = n̂·Ê, C = (r̂×n̂)·Ê。
+   * 若只按一阶导数 C 做比例控制, 在"轨道面恰好在赤道面"时会退化成 C ≡ 0, 永远不动。
+   * 所以这里直接解出到达目标所需的角度(二阶效应), 再限幅成每帧一小步。
+   * 绕 r 旋转 v 时 |v| 与 |r| 都不变, 轨道形状不变, 只有轨道面在倾斜。 */
   function relaxTilt() {
     var r = S.r, v = S.v;
     var rn = V.len(r); if (rn < 1e-9) return;
     var rh = V.mul(r, 1 / rn);
     var L = V.cross(r, v), Lm = V.len(L); if (Lm < 1e-12) return;
     var nh = V.mul(L, 1 / Lm);
-    var A = -nh[2];                                   /* cos(beta) */
-    var C = -(V.cross(rh, nh))[2];                    /* d cos(beta)/d(delta) at 0 */
-    var psi = Math.acos(clamp(A, -1, 1));
-    var dpsi = S.betaDisp - psi;
-    if (Math.abs(dpsi) < 2e-5 || Math.abs(C) < 1e-5) return;
-    /* cos(psi+delta) = A cos(delta) + C sin(delta), 在 delta=0 处导数为 C。
-     * 要让 psi 增大就得让 cos(psi) 减小 ==> delta 与 C 反号。 */
-    var delta = (C > 0 ? -1 : 1) * clamp(dpsi, -0.05, 0.05);
+    var A = -nh[2];
+    var C = -(V.cross(rh, nh))[2];
+    var R = Math.hypot(A, C);
+    if (R < 1e-6) return;
+    var want = Math.cos(clamp(S.betaDisp, 0, Math.PI / 2));   /* 目标 |cos psi| */
+    var d0 = Math.atan2(C, A), delta, s;
+    if (R <= want) {
+      delta = d0;                       /* 该时刻够不到目标倾角, 先转到能达到的最小倾角 */
+    } else {
+      s = Math.acos(clamp(want / R, -1, 1));
+      var a1 = ((d0 - s + Math.PI) % TAU + TAU) % TAU - Math.PI;
+      var a2 = ((d0 + s + Math.PI) % TAU + TAU) % TAU - Math.PI;
+      delta = Math.abs(a1) < Math.abs(a2) ? a1 : a2;
+    }
+    delta = clamp(delta, -0.03, 0.03);
+    if (Math.abs(delta) < 1e-6) return;
     var vr = V.mul(rh, V.dot(v, rh));
     var vt = V.sub(v, vr);
     var cd = Math.cos(delta), sd = Math.sin(delta);
@@ -236,12 +262,15 @@ function createApp(canvas, doc, win) {
     /* ---- 弛豫: 布洛赫唯象阻尼 ---- */
     if (S.relax && S.Tau > 0) {
       blochStep(dtSim);
-      var tgt = S.quant ? nearestAllowed(S.betaCont, S.lq) : S.betaCont;
-      S.betaDisp += (tgt - S.betaDisp) * clamp(dtWall / 0.10, 0, 1);  /* 量子跃迁用 0.1s 过渡 */
+      /* 驱动目标是"轨道面"的倾斜(无向), 所以用 min(beta, 180-beta):
+       * 纯纵向(反转恢复)时 beta 从 180 跳到 0, 但两者对应同一个赤道面, 无需翻转。 */
+      var bp2 = Math.min(S.betaCont, Math.PI - S.betaCont);
+      var tgt = S.quant ? nearestAllowed(bp2, S.lq) : bp2;
+      S.betaDisp += (tgt - S.betaDisp) * clamp(dtWall / 0.10, 0, 1);
       relaxTilt();
     } else {
-      S.betaDisp = tiltFromEq(S.L);
-      S.betaCont = S.betaDisp;
+      S.betaCont = tiltFromEq(S.L);
+      S.betaDisp = Math.min(S.betaCont, Math.PI - S.betaCont);
     }
     if (S.quant) S.mNow = mForBeta(tiltFromEq(S.L), S.lq);
 
@@ -253,19 +282,32 @@ function createApp(canvas, doc, win) {
     S.phiPrev = phi;
     S.L = L; S.Lmag = V.len(L); S.rmag = PH.radius(S);
     S.thetaNow = Math.acos(clamp(V.unit(L)[2], -1, 1));   /* 当前真实倾角 ∠(L, +Z) */
+    /* 绘制用的系综平均 ⟨L⟩: 方向取自布洛赫变量, 长度 ∝ |⟨L⟩|。
+     * 反转恢复(π 脉冲)时 |⟨L⟩| 会穿过 0 再反向长出来 —— 此时方向翻转 180°
+     * 但长度恰好为 0, 所以视觉上是"缩成一个点再长出来", 与布洛赫图像一致。 */
+    S.mag = 1;
+    S.Ldraw = V.unit(L);
+    if (S.relax) {
+      var rr = Math.hypot(S.bp, S.bz) || 1e-9;
+      var phd = Math.atan2(L[1], L[0]);
+      S.Ldraw = [S.bp * Math.cos(phd) / rr, S.bp * Math.sin(phd) / rr, S.bz / rr];
+      S.mag = rr / (S.L0mag || 1);
+    }
     S.dE = Math.abs((PH.energy(S) - S.E0) / S.E0);
     S.wMeas = S.t > 4 ? S.phiAcc / S.t : S.B / 2;
 
     /* ---- 记录: L 矢端轨迹(弛豫时画出内收螺线) 与 横向相干曲线(FID 包络) ---- */
     if (S.relax || S.quant) {
-      var tp = V.mul(V.unit(L), 1.55);
+      var Ud = S.Ldraw || V.unit(L);
+      var mL2 = 1.55 * (S.mag === undefined ? 1 : S.mag);
+      var tp = V.mul(Ud, mL2);
       S.tipTrace.push(tp);
       if (S.tipTrace.length > 3000) S.tipTrace.splice(0, S.tipTrace.length - 3000);
     } else if (S.tipTrace.length) {
       S.tipTrace.length = 0;
     }
-    /* 横向磁化 |M⊥|/|M| = bp/|L0| —— 这就是 FID 的包络 (指数衰减) */
-    S.cohHist.push([S.t, S.relax ? clamp(S.bp / (S.L0mag || 1), 0, 1) : 0]);
+    /* 记录: 纵向磁化 M_z 与横向磁化 |M⊥|, 两条曲线各有自己的时间常数 */
+    S.cohHist.push([S.t, clamp(-S.bz / (S.L0mag || 1), -1, 1), clamp(S.bp / (S.L0mag || 1), 0, 1)]);
     if (S.cohHist.length > 1400) S.cohHist.splice(0, S.cohHist.length - 1400);
   }
 
@@ -521,10 +563,10 @@ function createApp(canvas, doc, win) {
   /* ============ 进动相位盘: 让"绕 Z 轴匀速转动"成为画面最明确的信息 ============ */
   function drawPrecessionDial() {
     if (!ui.dial) return;
-    var a = V.unit(S.L), len = 1.55;
+    var a = S.Ldraw || V.unit(S.L), len = 1.55 * (S.mag === undefined ? 1 : S.mag);
     var zL = len * a[2];
     var rL = Math.hypot(len * a[0], len * a[1]);
-    if (rL < 0.05) return;
+    if (rL < 0.02) return;
     var i, N = 96, pts = [], ph;
 
     /* L 矢端的水平轨迹圆 (= 进动锥的边沿) */
@@ -593,40 +635,66 @@ function createApp(canvas, doc, win) {
     ctx.strokeStyle = 'rgba(120,170,255,0.22)'; ctx.lineWidth = 1; ctx.stroke();
   }
 
-  /* 横向磁化 |M_⊥| ∝ sinβ: 退相位曲线 = FID 包络 */
+  /* 纵向 M_z 与横向 |M⊥| 两条曲线, 各有自己的时间常数 T1 / T2 */
   function drawCohInset(x, y, w, h) {
     panel(x, y, w, h);
-    text('\u6a2a\u5411\u78c1\u5316 |M\u22a5| \u221d sin\u03b2   (FID \u5305\u7edc)', x + 12, y + 15, 12, 'rgba(170,205,240,0.92)', 'left', false);
-    var pad = 12, gx = x + pad + 22, gy = y + 28, gw = w - pad * 2 - 30, gh = h - 28 - 20;
+    text('\u78c1\u5316\u5f3a\u5ea6  M_z \u4e0e |M\u22a5|', x + 12, y + 15, 12, 'rgba(170,205,240,0.92)', 'left', false);
+    text('T\u2081 ' + (S.T1 / TAU).toFixed(0) + ' \u5708   T\u2082 ' + (S.Tau / TAU).toFixed(0) + ' \u5708',
+         x + w - 12, y + 15, 11.5, 'rgba(170,205,240,0.9)', 'right', false);
+    var pad = 12, gx = x + pad + 26, gy = y + 28, gw = w - pad * 2 - 34, gh = h - 28 - 22;
+    /* 纵轴: +1 (平衡) .. -1 (反转) */
     ctx.strokeStyle = 'rgba(120,170,255,0.18)'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(gx, gy); ctx.lineTo(gx, gy + gh); ctx.lineTo(gx + gw, gy + gh); ctx.stroke();
-    text('1', gx - 6, gy + 3, 10, 'rgba(140,170,205,0.75)', 'right', false);
-    text('0', gx - 6, gy + gh - 3, 10, 'rgba(140,170,205,0.75)', 'right', false);
+    var y0 = gy + gh * 0.5;                       /* 零线 */
+    ctx.beginPath(); ctx.moveTo(gx, y0); ctx.lineTo(gx + gw, y0);
+    ctx.strokeStyle = 'rgba(120,170,255,0.13)'; ctx.stroke();
+    text('+1', gx - 6, gy + 4, 9.5, 'rgba(140,170,205,0.75)', 'right', false);
+    text('0', gx - 6, y0, 9.5, 'rgba(140,170,205,0.75)', 'right', false);
+    text('\u22121', gx - 6, gy + gh - 4, 9.5, 'rgba(140,170,205,0.75)', 'right', false);
+
     var n = S.cohHist.length;
     if (n < 3) return;
     var i, t0 = S.cohHist[0][0], t1 = S.cohHist[n - 1][0], dt = Math.max(t1 - t0, 1e-6);
-    /* e^(-t/Tau) 参考包络 */
-    if (S.relax) {
+    var px = function (t) { return gx + gw * (t - t0) / dt; };
+    var py = function (v) { return y0 - gh * 0.5 * clamp(v, -1, 1); };
+
+    if (S.relax) {                                 /* 解析参考(虚线) */
+      if (ctx.setLineDash) ctx.setLineDash([4, 5]);
+      ctx.strokeStyle = 'rgba(180,210,255,0.42)'; ctx.lineWidth = 1;
       ctx.beginPath();
       for (i = 0; i < n; i++) {
-        var tt = S.cohHist[i][0] - t0;
-        var vv = Math.sin(S.theta0 || S.theta) * Math.exp(-tt / S.Tau);
-        var px = gx + gw * (S.cohHist[i][0] - t0) / dt, py = gy + gh * (1 - clamp(vv, 0, 1));
-        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        var t3 = S.cohHist[i][0] - t0;
+        var a1 = 1 + (S.mz0 - 1) * Math.exp(-t3 / S.T1);
+        if (i === 0) ctx.moveTo(px(S.cohHist[i][0]), py(a1)); else ctx.lineTo(px(S.cohHist[i][0]), py(a1));
       }
-      if (ctx.setLineDash) ctx.setLineDash([4, 5]);
-      ctx.strokeStyle = rgba(COL.relax, 0.45); ctx.lineWidth = 1; ctx.stroke();
+      ctx.stroke();
+      ctx.beginPath();
+      for (i = 0; i < n; i++) {
+        var t4 = S.cohHist[i][0] - t0;
+        var a2 = S.mp0 * Math.exp(-t4 / S.Tau);
+        if (i === 0) ctx.moveTo(px(S.cohHist[i][0]), py(a2)); else ctx.lineTo(px(S.cohHist[i][0]), py(a2));
+      }
+      ctx.stroke();
       if (ctx.setLineDash) ctx.setLineDash([]);
     }
-    /* 实测曲线 */
+    /* 实测: M_z (琥珀) 与 |M⊥| (绿) */
     ctx.beginPath();
     for (i = 0; i < n; i++) {
-      var px2 = gx + gw * (S.cohHist[i][0] - t0) / dt;
-      var py2 = gy + gh * (1 - clamp(S.cohHist[i][1], 0, 1));
-      if (i === 0) ctx.moveTo(px2, py2); else ctx.lineTo(px2, py2);
+      var X = px(S.cohHist[i][0]), Y = py(S.cohHist[i][1]);
+      if (i === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
+    }
+    ctx.strokeStyle = rgba(COL.quant, 0.95); ctx.lineWidth = 1.8; ctx.stroke();
+    ctx.beginPath();
+    for (i = 0; i < n; i++) {
+      var X2 = px(S.cohHist[i][0]), Y2 = py(S.cohHist[i][2]);
+      if (i === 0) ctx.moveTo(X2, Y2); else ctx.lineTo(X2, Y2);
     }
     ctx.strokeStyle = rgba(COL.relax, 0.96); ctx.lineWidth = 1.8; ctx.stroke();
-    text('T = ' + (S.Tau / TAU).toFixed(1) + ' \u516c\u8f6c\u5468\u671f', x + w - 12, y + 15, 12, rgba(COL.relax, 0.9), 'right', false);
+    /* 图例 */
+    ctx.fillStyle = rgba(COL.quant, 0.95); ctx.fillRect(x + 12, y + h - 11, 10, 3);
+    text('M_z', x + 26, y + h - 9, 10, rgba(COL.quant, 0.9), 'left', false);
+    ctx.fillStyle = rgba(COL.relax, 0.95); ctx.fillRect(x + 62, y + h - 11, 10, 3);
+    text('|M\u22a5|', x + 76, y + h - 9, 10, rgba(COL.relax, 0.9), 'left', false);
   }
 
   /* m 能级梯: E_m = m·omega_L, 基态 m = -l, 只有 dm = ±1 的磁偶极跃迁 */
@@ -759,45 +827,47 @@ function createApp(canvas, doc, win) {
 
   function drawVectors() {
     /* --- 对顶双锥 ---
-     * 用"当前真实倾角" S.thetaNow, 而不是滑杆初值; 弛豫把 L 推向 -Z 时
-     * theta -> 180°, 两个锥会一起收成一条线 = 进动停止。 */
-    var thN = (S.thetaNow === undefined) ? S.theta : S.thetaNow;
+     * 方向用绘制用矢量 U (= 系综平均 ⟨L⟩ 的方向), 斜高乘 |⟨L⟩| —— 退相干时整个锥塌掉。 */
+    var U = S.Ldraw || V.unit(S.L);
+    var mLen = 1.55 * (S.mag === undefined ? 1 : S.mag);
+    if (mLen < 0.004) mLen = 0.004;
+    var thU = Math.acos(clamp(U[2], -1, 1));
     if (ui.cone) {
-      var h = Math.min(thN, Math.PI - thN);
-      var lax = (thN <= Math.PI / 2) ? [0, 0, 1] : [0, 0, -1];
-      var max2 = (thN <= Math.PI / 2) ? [0, 0, -1] : [0, 0, 1];
+      var h = Math.min(thU, Math.PI - thU);
+      var lax = (thU <= Math.PI / 2) ? [0, 0, 1] : [0, 0, -1];
+      var max2 = (thU <= Math.PI / 2) ? [0, 0, -1] : [0, 0, 1];
       if (h > 0.006) {
-        drawCone(lax, h, 1.55, COL.L, ui.coneA);
-        drawCone(max2, h, 0.775, COL.mu, ui.coneA);
+        drawCone(lax, h, mLen, COL.L, ui.coneA);
+        drawCone(max2, h, mLen * 0.5, COL.mu, ui.coneA);
       }
     }
-    /* --- 角动量 L --- */
-    drawArrow(S.L, 1.55, COL.L, [255, 250, 235], 'L', 1);
-    /* --- 磁矩 mu = -L/2 (原子单位的真实比例) --- */
-    if (ui.mu) drawArrow(V.mul(S.L, -1), 0.775, COL.mu, [255, 235, 245], '\u03bc', 1);
+    /* --- 角动量 ⟨L⟩ --- */
+    drawArrow(U, mLen, COL.L, [255, 250, 235], 'L', 1);
+    /* --- 磁矩 ⟨μ⟩ = -⟨L⟩/2 (原子单位的真实比例) --- */
+    if (ui.mu) drawArrow(V.mul(U, -1), mLen * 0.5, COL.mu, [255, 235, 245], '\u03bc', 1);
     /* --- 自旋 S --- */
     if (ui.spin) {
       updateSpin();
       drawArrow(spinDir, 0.95, COL.spin, [245, 240, 255], 'S', 1);
       var b = basis([0, 0, 1]), u = b[1], w = b[2];
-      var pts = [], i, a2, R = 0.95 * Math.sin(thN), zz = 0.95 * Math.cos(thN);
+      var pts = [], i, a2, R = 0.95 * Math.sin(thU), zz = 0.95 * Math.cos(thU);
       for (i = 0; i <= 72; i++) { a2 = i / 72 * TAU; pts.push([R * Math.cos(a2), R * Math.sin(a2), zz]); }
       polyAll(pts, COL.spin, 0.20, 1);
     }
     /* --- theta 角弧 --- */
-    var Lh = V.unit(S.L);
-    if (Math.abs(thN) > 0.02 && Math.abs(thN - Math.PI) > 0.02) {
+    var Lh = U;
+    if (Math.abs(thU) > 0.02 && Math.abs(thU - Math.PI) > 0.02) {
       var arc = [], K = 26, T;
       for (i = 0; i <= K; i++) {
         T = i / K;
-        var s1 = Math.sin((1 - T) * thN) / Math.sin(thN), s2 = Math.sin(T * thN) / Math.sin(thN);
+        var s1 = Math.sin((1 - T) * thU) / Math.sin(thU), s2 = Math.sin(T * thU) / Math.sin(thU);
         var d = V.add(V.mul([0, 0, 1], s1), V.mul(Lh, s2));
         arc.push(V.mul(d, 0.52));
       }
       polyAll(arc, COL.white, 0.42, 1.2);
     }
-    var pm = project(V.mul(V.unit(V.add(V.mul([0, 0, 1], Math.cos(thN / 2)), V.mul(Lh, 1))), 0.60));
-    if (pm.vis) text('\u03b8 = ' + (thN / DEG).toFixed(0) + '\u00b0', pm.x + 8, pm.y, 15, 'rgba(235,245,255,0.92)', 'left', false);
+    var pm = project(V.mul(V.unit(V.add(V.mul([0, 0, 1], Math.cos(thU / 2)), V.mul(Lh, 1))), 0.60));
+    if (pm.vis) text('\u03b8 = ' + (thU / DEG).toFixed(0) + '\u00b0', pm.x + 8, pm.y, 15, 'rgba(235,245,255,0.92)', 'left', false);
   }
 
   function drawElectron() {
@@ -866,7 +936,8 @@ function createApp(canvas, doc, win) {
      'b-pause', 'b-reset', 'b-cam', 'b-png', 'l-ratio', 'l-speed',
      'r-res', 'r-fps', 'r-dur', 'c-reset', 'c-burn', 'b-rec', 'v-rec', 'v-recbar',
      'c-axes', 'c-dial', 'c-ghost', 'b-v1', 'b-v2', 'b-v3',
-     'c-relax', 'r-t2', 'c-quant', 'r-l', 'l-t2', 'l-l', 'c-panels', 'b-pulse'
+     'c-relax', 'r-t1', 'r-t2p', 'c-quant', 'r-l', 'l-t1', 'l-t2p', 'l-t2', 'l-l',
+     'c-panels', 'b-pulse', 'b-pulse-pi'
     ].forEach(function (id) { el[id] = need(id); });
 
     el['r-ratio'].value = (S.Btarget / 2).toFixed(3);
@@ -901,29 +972,39 @@ function createApp(canvas, doc, win) {
     ui.relaxPanel = ui.quantPanel = !!el['c-panels'].checked;
 
     /* --- 弛豫 / 空间量子化 --- */
-    function t2FromSlider(v) { return 4 * Math.pow(10, v / 40) * TAU; }   /* 4 .. 400 公转周期 */
-    function t2Label() {
-      var orbs = S.Tau / TAU;
-      if (el['l-t2']) el['l-t2'].textContent = (orbs < 10 ? orbs.toFixed(1) : orbs.toFixed(0)) + ' \u5708';
+    /* T1: 纵向(自旋-晶格)弛豫时间, 4 .. 1200 公转周期 (对数) */
+    function t1FromSlider(v) { return 4 * Math.pow(10, v / 40) * TAU; }
+    /* 纯退相位速率 1/T2', 0 = 无纯退相位 (此时 T2 = 2T1) */
+    function rate2pFromSlider(v) { return v / 100 * 0.5 / TAU; }
+    function relLabels() {
+      if (el['l-t1']) el['l-t1'].textContent = (S.T1 / TAU).toFixed(0) + ' \u5708';
+      var r = S.rate2p;
+      if (el['l-t2p']) el['l-t2p'].textContent = r <= 0 ? '\u65e0\uff08T\u2082 = 2T\u2081\uff09' : (1 / r / TAU).toFixed(0) + ' \u5708';
+      if (el['l-t2']) el['l-t2'].textContent = (S.Tau / TAU).toFixed(0) + ' \u5708';
     }
-    /* π/2 脉冲: 把磁矩扳到横向平面, 这是 FID 实验的起点 */
-    function pulse90() {
-      S.thetaDeg = 90; S.theta = Math.PI / 2;
-      if (el['r-theta']) el['r-theta'].value = '90';
+    /* π/2 脉冲: 把磁矩扳到横向平面 (FID / T2 的起点) */
+    function pulse(thetaDeg) {
+      S.thetaDeg = thetaDeg; S.theta = thetaDeg * Math.PI / 180;
+      if (el['r-theta']) el['r-theta'].value = String(thetaDeg);
       reset();
     }
-    el['b-pulse'].addEventListener('click', function () { pulse90(); });
+    el['b-pulse'].addEventListener('click', function () { pulse(90); });
+    el['b-pulse-pi'].addEventListener('click', function () { pulse(0); });   /* π 脉冲: 反转, 看 T1 */
     el['c-relax'].addEventListener('change', function () {
       S.relax = !!el['c-relax'].checked;
       if (S.relax) {
-        /* 按 FID 协议: 开启弛豫时自动打一个 π/2 脉冲 (θ -> 90°), 这样锥是单调收口的 */
-        if (Math.abs(S.theta - Math.PI / 2) > 0.25) pulse90();
+        /* 按 FID 协议: 开启弛豫时自动打一个 π/2 脉冲 (θ -> 90°), 锥才是单调收口的。
+         * 但如果 URL 显式给了 theta, 就尊重它 (例如 ?theta=0 做反转恢复)。 */
+        if (!S.noPulse && Math.abs(S.theta - Math.PI / 2) > 0.25) pulse(90);
         syncRelax(); S.cohHist.length = 0; S.tipTrace.length = 0;
       }
       ui.relaxPanel = S.relax;
     });
-    el['r-t2'].addEventListener('input', function () { S.Tau = t2FromSlider(parseFloat(el['r-t2'].value)); t2Label(); });
-    S.Tau = t2FromSlider(parseFloat(el['r-t2'].value)); t2Label();
+    el['r-t1'].addEventListener('input', function () { S.T1 = t1FromSlider(parseFloat(el['r-t1'].value)); recomputeT2(); relLabels(); });
+    el['r-t2p'].addEventListener('input', function () { S.rate2p = rate2pFromSlider(parseFloat(el['r-t2p'].value)); recomputeT2(); relLabels(); });
+    S.T1 = t1FromSlider(parseFloat(el['r-t1'].value));
+    S.rate2p = rate2pFromSlider(parseFloat(el['r-t2p'].value));
+    recomputeT2(); relLabels();
 
     el['c-quant'].addEventListener('change', function () {
       S.quant = !!el['c-quant'].checked;
@@ -1034,11 +1115,16 @@ function createApp(canvas, doc, win) {
 
     /* --- 弛豫 / 量子化 读数 --- */
     var psi = tiltFromEq(S.L);
-    var bpNow = clamp(S.bp / (S.L0mag || 1), 0, 1);
+    var mz = clamp(-S.bz / (S.L0mag || 1), -1, 1), mp = clamp(S.bp / (S.L0mag || 1), 0, 1);
     hud('v-beta', (psi / DEG).toFixed(1) + '\u00b0');
-    hud('v-sinb', S.relax ? bpNow.toFixed(4) : '\u2014');
-    hud('v-sinb-ref', S.relax ? (Math.sin(S.theta0 || S.theta) * Math.exp(-S.t / S.Tau)).toFixed(4) : '\u2014');
+    hud('v-sinb', S.relax ? mp.toFixed(4) : '\u2014');
+    hud('v-sinb-ref', S.relax ? (S.mp0 * Math.exp(-S.t / S.Tau)).toFixed(4) : '\u2014');
+    hud('v-mz', S.relax ? mz.toFixed(4) : '\u2014');
+    hud('v-mz-ref', S.relax ? (1 + (S.mz0 - 1) * Math.exp(-S.t / S.T1)).toFixed(4) : '\u2014');
+    hud('v-t1', (S.T1 / TAU).toFixed(1) + ' \u5708');
+    hud('v-t2p', S.rate2p <= 0 ? '\u221e (\u65e0\u7eaf\u9000\u76f8\u4f4d)' : (1 / S.rate2p / TAU).toFixed(1) + ' \u5708');
     hud('v-tau', (S.Tau / TAU).toFixed(1) + ' \u5708');
+    hud('v-t2bound', '2T\u2081 = ' + (2 * S.T1 / TAU).toFixed(0) + ' \u5708  \u2265 T\u2082 \u2713');
     hud('v-lq', 'l = ' + S.lq);
     hud('v-ncone', String(2 * S.lq + 1));
     hud('v-mina', S.quant ? (Math.acos(clamp(S.lq / Math.sqrt(S.lq * (S.lq + 1)), -1, 1)) / DEG).toFixed(1) + '\u00b0' : '\u2014');
@@ -1286,10 +1372,9 @@ if (typeof document !== 'undefined' && typeof window !== 'undefined' && document
     if (P.relax === '1') { var cr0 = document.getElementById('c-relax'); if (cr0) cr0.checked = true; }
     if (P.quant === '1') { var cq0 = document.getElementById('c-quant'); if (cq0) cq0.checked = true; }
     if (P.panels === '0') { var cp0 = document.getElementById('c-panels'); if (cp0) cp0.checked = false; }
-    if (P.theta !== undefined) { app.state.thetaDeg = parseFloat(P.theta); app.state.theta = app.state.thetaDeg * Math.PI / 180; }
+    if (P.theta !== undefined) { app.state.thetaDeg = parseFloat(P.theta); app.state.theta = app.state.thetaDeg * Math.PI / 180; app.state.noPulse = 1; }
     if (P.ratio !== undefined) { app.state.Btarget = 2 * parseFloat(P.ratio); app.state.B = app.state.Btarget; }
     if (P.trail !== undefined) app.state.trailFrac = Math.max(0, Math.min(1, parseFloat(P.trail) / 100));
-    if (P.theta !== undefined) { app.state.thetaDeg = parseFloat(P.theta); app.state.theta = app.state.thetaDeg * Math.PI / 180; }
     if (P.l !== undefined) app.state.lq = Math.max(1, Math.min(6, parseInt(P.l, 10) || 2));
 
     function fit() { app.resize(window.innerWidth, window.innerHeight); }

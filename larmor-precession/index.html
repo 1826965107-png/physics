@@ -149,9 +149,14 @@
   <hr>
   <div class="sec">弛豫 · 空间量子化</div>
   <div class="row"><span class="k">距平衡角 β = ∠(L, −Z)</span><span class="v mi" id="v-beta">—</span></div>
-  <div class="row"><span class="k">横向相干 sin β（实测）</span><span class="v mi" id="v-sinb">—</span></div>
-  <div class="row"><span class="k">指数包络 e<sup>−t/T₂</sup>（预测）</span><span class="v" id="v-sinb-ref">—</span></div>
-  <div class="row"><span class="k">T₂</span><span class="v" id="v-tau">—</span></div>
+  <div class="row"><span class="k">横向磁化 |M⊥|/M<sub>eq</sub></span><span class="v mi" id="v-sinb">—</span></div>
+  <div class="row"><span class="k">横向解析 M⊥₀·e<sup>−t/T₂</sup></span><span class="v" id="v-sinb-ref">—</span></div>
+  <div class="row"><span class="k">纵向磁化 M<sub>z</sub>/M<sub>eq</sub></span><span class="v hot" id="v-mz">—</span></div>
+  <div class="row"><span class="k">纵向解析 1+(M<sub>z0</sub>−1)e<sup>−t/T₁</sup></span><span class="v" id="v-mz-ref">—</span></div>
+  <div class="row"><span class="k">T₁ 纵向（自旋-晶格）</span><span class="v" id="v-t1">—</span></div>
+  <div class="row"><span class="k">T₂′ 纯退相位</span><span class="v" id="v-t2p">—</span></div>
+  <div class="row"><span class="k">T₂ 横向（合成）</span><span class="v" id="v-tau">—</span></div>
+  <div class="row"><span class="k">约束 T₂ ≤ 2T₁</span><span class="v mi" id="v-t2bound">—</span></div>
   <div class="row"><span class="k">角量子数 l</span><span class="v" id="v-lq">—</span></div>
   <div class="row"><span class="k">允许锥数 2l+1</span><span class="v" id="v-ncone">—</span></div>
   <div class="row"><span class="k">当前 m</span><span class="v" id="v-m">—</span></div>
@@ -210,12 +215,20 @@
     <label><input type="checkbox" id="c-panels" checked>角标图</label>
   </div>
 
-  <label class="ctl" style="margin-top:8px">横向弛豫时间 T₂ <span id="l-t2">40 圈</span></label>
-  <input id="r-t2" type="range" min="0" max="100" step="1" value="40">
+  <label class="ctl" style="margin-top:8px">T₁ 纵向（自旋-晶格）<span id="l-t1">20 圈</span></label>
+  <input id="r-t1" type="range" min="0" max="100" step="1" value="28">
+
+  <label class="ctl">纯退相位 T₂′（不交换能量）<span id="l-t2p">无（T₂ = 2T₁）</span></label>
+  <input id="r-t2p" type="range" min="0" max="100" step="1" value="0">
+
+  <label class="ctl">合成横向弛豫 T₂ <span id="l-t2">40 圈</span></label>
 
   <label class="ctl">角量子数 <span id="l-l">l = 2 (5 个锥)</span></label>
   <input id="r-l" type="range" min="1" max="6" step="1" value="2">
-  <button id="b-pulse" style="width:100%;margin-top:8px">π/2 脉冲（置 θ = 90°，FID 起点）</button>
+  <div class="btns">
+    <button id="b-pulse">π/2 脉冲（θ=90°，看 T₂）</button>
+    <button id="b-pulse-pi">π 脉冲（θ=0°，看 T₁）</button>
+  </div>
 
   <div class="btns">
     <button id="b-pause">暂停 ⏸</button>

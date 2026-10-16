@@ -14,17 +14,28 @@ let errors = [];
 let drawingCalls = 0;
 const methodCount = {};
 
-/* ---------------- canvas 2d 上下文桩件 ---------------- */
+/* ---------------- canvas 2d 上下文桩件 (同时录制描边, 供屏幕空间检查) ---------------- */
+const rec = { on: false, strokeStyle: '', lineWidth: 0, cur: null, segs: [] };
 function makeCtx() {
-  const t = {};
-  return new Proxy(t, {
-    get(o, p) {
-      if (p === 'createRadialGradient' || p === 'createLinearGradient')
-        return () => ({ addColorStop() {} });
-      if (p in o) return o[p];
-      return (...a) => { drawingCalls++; methodCount[p] = (methodCount[p] || 0) + 1; };
+  const t = {
+    beginPath() { if (rec.on) rec.cur = []; },
+    moveTo(x, y) { if (rec.on && rec.cur) rec.cur.push([x, y]); },
+    lineTo(x, y) { if (rec.on && rec.cur) rec.cur.push([x, y]); },
+    stroke() {
+      if (rec.on && rec.cur && rec.cur.length > 1) rec.segs.push({ color: String(rec.strokeStyle), w: rec.lineWidth, pts: rec.cur.slice() });
+      rec.cur = null;
     },
-    set(o, p, v) { o[p] = v; return true; }
+    fill() { rec.cur = null; }, closePath() {}, arc() {}, rect() {},
+    createRadialGradient() { return { addColorStop() {} }; },
+    createLinearGradient() { return { addColorStop() {} }; }
+  };
+  return new Proxy(t, {
+    get(o, p) { if (p in o) return o[p]; return (...a) => { drawingCalls++; methodCount[p] = (methodCount[p] || 0) + 1; }; },
+    set(o, p, v) {
+      if (p === 'strokeStyle') rec.strokeStyle = v;
+      if (p === 'lineWidth') rec.lineWidth = v;
+      o[p] = v; return true;
+    }
   });
 }
 
@@ -274,6 +285,58 @@ else console.log('  → 轨道面已落在允许倾角上 ✓ (β = ' + tiltDeg(
   console.log('  绘制法线 vs 物理轨道法线: ' + ang.toFixed(2) + '° (同面/反向同面则应接近 0)');
   if (ang > 8) errors.push('画出来的箭头与轨道环不同面, μ 看起来不垂直于轨道面: ' + ang.toFixed(2) + '°');
 })();
+
+/* ---------------- 屏幕空间检查 ----------------
+ * 之前四轮 bug (μ 不垂直轨道面 / m 高亮乱跳 / 进动被摁死 / μ 长度不是一半)
+ * 全属于"三维数学量是对的、但屏幕上画出来不对"这一类, 只靠数值断言抓不到。
+ * 这里直接录制 canvas 的真实描边, 在屏幕坐标里验几何关系。 */
+function screenSpaceCheck(tag) {
+  rec.segs.length = 0;
+  rec.on = true;
+  app.render();
+  rec.on = false;
+  const shaft = (key) => {
+    let best = null, bl = 0;
+    for (const s of rec.segs) {
+      if (s.color.indexOf(key) < 0 || s.w < 8) continue;      /* 线宽>=8 = 箭杆外发光那一遍 */
+      const a = s.pts[0], b = s.pts[s.pts.length - 1];
+      const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (L > bl) { bl = L; best = { a, b, len: L }; }
+    }
+    return best;
+  };
+  const Lo = shaft('255,190,74'), mu = shaft('255,92,162');
+  if (!Lo || !mu) { errors.push(tag + ': 屏幕上找不到金黄色/品红色箭杆'); return; }
+  const cx = app.view.cx, cy = app.view.cy;
+  const u1 = [(Lo.b[0] - Lo.a[0]) / Lo.len, (Lo.b[1] - Lo.a[1]) / Lo.len];
+  const u2 = [(mu.b[0] - mu.a[0]) / mu.len, (mu.b[1] - mu.a[1]) / mu.len];
+  const cross = Math.abs(u1[0] * u2[1] - u1[1] * u2[0]);
+  const angDeg = Math.asin(Math.min(1, cross)) * 180 / Math.PI;
+  const ratio = mu.len / Lo.len;
+  const dL = Math.hypot(Lo.a[0] - cx, Lo.a[1] - cy);
+  const dM = Math.hypot(mu.a[0] - cx, mu.a[1] - cy);
+  /* 两箭杆必须在同一条过原点的直线上, 且方向相反 */
+  const sameLine = angDeg < 0.5;
+  const opposite = (u1[0] * u2[0] + u1[1] * u2[1]) < 0;
+  console.log('  [屏幕] ' + tag + ': 夹角 ' + angDeg.toFixed(2) + '°, 屏幕长度比 |μ|/|L| = ' +
+    ratio.toFixed(3) + ', 起点偏离中心 ' + Math.max(dL, dM).toFixed(1) + ' px');
+  if (!sameLine) errors.push(tag + ': 屏幕上 L 与 μ 箭杆不共线(' + angDeg.toFixed(2) + '°)');
+  if (!opposite) errors.push(tag + ': 屏幕上 μ 与 L 同向而不是反向');
+  if (Math.abs(ratio - 0.5) > 0.02) errors.push(tag + ': 屏幕上 |μ|/|L| = ' + ratio.toFixed(3) + ', 应严格为 0.500');
+  if (Math.max(dL, dM) > 1.5) errors.push(tag + ': 箭杆没有从原点画出 (偏离 ' + Math.max(dL, dM).toFixed(1) + ' px)');
+}
+console.log('');
+console.log('屏幕空间几何检查 (录制真实描边):');
+screenSpaceCheck('默认 θ=30°');
+getEl('r-theta').value = '60'; fire('r-theta', 'input'); app.tick(1 / 60);
+screenSpaceCheck('θ=60°');
+getEl('r-theta').value = '120'; fire('r-theta', 'input'); app.tick(1 / 60);
+screenSpaceCheck('θ=120° (L 指向下)');
+getEl('c-quant').checked = true; fire('c-quant', 'change'); app.tick(1 / 60);
+screenSpaceCheck('量子化 l=2');
+getEl('c-relax').checked = true; fire('c-relax', 'change');
+for (let i = 0; i < 300; i++) app.tick(1 / 60);
+screenSpaceCheck('弛豫中');
 
 /* ---------------- 检查元素 id 与 index.html 一致 ---------------- */
 const appSrc = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');

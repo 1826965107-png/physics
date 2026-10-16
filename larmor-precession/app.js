@@ -77,15 +77,18 @@ function createApp(canvas, doc, win) {
     view.w = w; view.h = h; view.cx = w * 0.5; view.cy = h * 0.5;
     view.dist = cam.dist;
     view.eye = eye; view.f = f; view.r = r; view.u = u;
-    view.focal = 0.98 * Math.min(w, h) * cam.zoom;
+    /* 正交投影 (平行投影): 像素尺度与深度无关。
+     * 透视会让"指向相反深度方向"的两个箭头长度失真 —— 实测 |μ|/|L| 在屏幕上
+     * 会在 0.25~0.6 之间漂, 而物理上它必须精确等于 0.500 (μ = -½L)。
+     * 对一张几何/矢量图来说, 正交投影才保长度比与共线性。 */
+    view.scale = 0.98 * Math.min(w, h) * cam.zoom / cam.dist;
   }
   function project(p) {
     var dx = p[0] - view.eye[0], dy = p[1] - view.eye[1], dz = p[2] - view.eye[2];
     var X = dx * view.r[0] + dy * view.r[1] + dz * view.r[2];
     var Y = dx * view.u[0] + dy * view.u[1] + dz * view.u[2];
     var Z = dx * view.f[0] + dy * view.f[1] + dz * view.f[2];
-    var s = view.focal / (Z > 0.15 ? Z : 0.15);
-    return { x: view.cx + X * s, y: view.cy - Y * s, z: Z, vis: Z > 0.15 };
+    return { x: view.cx + X * view.scale, y: view.cy - Y * view.scale, z: Z, vis: true };
   }
   /* 深度衰减: 靠近相机的部分更亮 */
   function dA(z, base) {

@@ -217,15 +217,31 @@ function createApp(canvas, doc, win) {
     var C = -(V.cross(rh, nh))[2];
     var R = Math.hypot(A, C);
     if (R < 1e-6) return;
+    /* 死区: 不要理会微小起伏。
+     * 精确积分本身就带一个 O(B) 的章动(倾角在 ~0.6° 内起伏)。若每帧都去
+     * 镇压它, 这些绕 r̂ 的修正会带有系统性方位角分量, 累积起来足以把拉莫尔
+     * 进动抵消掉(实测方位角从 15.8°/s 掉到 1.5°/s)。所以只在偏差超过死区时才动。 */
+    var planeNow = Math.acos(clamp(Math.abs(A), 0, 1));
+    if (Math.abs(planeNow - S.betaDisp) < 0.025) return;
     var want = Math.cos(clamp(S.betaDisp, 0, Math.PI / 2));   /* 目标 |cos psi| */
-    var d0 = Math.atan2(C, A), delta, s;
-    if (R <= want) {
-      delta = d0;                       /* 该时刻够不到目标倾角, 先转到能达到的最小倾角 */
-    } else {
+    var d0 = Math.atan2(C, A), delta = 0, s, cand, i, best;
+    var cur = Math.abs(A);                        /* 当前 |cos psi| */
+    if (want <= R) {
+      /* 目标可达: 直接解出所需角度, 在 4 个解里取 |δ| 最小的那个。
+       * 已经到位时 δ=0 本身就是解之一, 所以不会再被硬推 -> 不抖。 */
       s = Math.acos(clamp(want / R, -1, 1));
-      var a1 = ((d0 - s + Math.PI) % TAU + TAU) % TAU - Math.PI;
-      var a2 = ((d0 + s + Math.PI) % TAU + TAU) % TAU - Math.PI;
-      delta = Math.abs(a1) < Math.abs(a2) ? a1 : a2;
+      best = 1e9;
+      for (i = 0; i < 4; i++) {
+        cand = d0 + (i === 0 ? s : i === 1 ? -s : i === 2 ? (Math.PI - s) : -(Math.PI - s));
+        cand = ((cand + Math.PI) % TAU + TAU) % TAU - Math.PI;
+        if (Math.abs(cand) < best) { best = Math.abs(cand); delta = cand; }
+      }
+    } else {
+      /* 目标当前够不到: 该相位下最多只能到 acos(R)。
+       * 正确做法是"等" —— 同一个目标在轨道另一段相位(R 更大时)就能达到。
+       * 若在这里硬推到极端, 就会每帧跟进动对着干, 形成极限环,
+       * 表现为"箭头几乎不转、只是在抖"。 */
+      delta = 0;
     }
     delta = clamp(delta, -0.03, 0.03);
     if (Math.abs(delta) < 1e-6) return;
@@ -260,18 +276,25 @@ function createApp(canvas, doc, win) {
     if (S.hist.length > histCap) S.hist.splice(0, S.hist.length - histCap);
     if (S.recent.length > CFG.recentMax) S.recent.splice(0, S.recent.length - CFG.recentMax);
 
-    /* ---- 弛豫 / 空间量子化 对"轨道面取向"的约束 ----
-     * 注意: 轨道面是"无向"的 —— 面倾角 p 与 180°-p 是同一个面。
-     * 但量子数 m 是"有向"的: 对 l=2, 允许的有向 beta 是
-     *   35.3°(m=-2) 65.9°(-1) 90°(0) 114.1°(+1) 144.7°(+2)
-     * 而面倾角只有 35.3/65.9/90 三个值, 35.3° 同时对应 m=±2。
-     * 所以 m 必须由有向的布洛赫倾角 S.betaCont 决定, 绝不能由驱动后的
-     * 几何倾角决定 —— 否则高亮会在 +m 和 -m 之间乱跳。 */
+    /* ---- 弛豫 / 空间量子化 对"轨道面取向"的约束 ---- */
     if (S.relax && S.Tau > 0) blochStep(dtSim);
     else S.betaCont = tiltFromEq(S.L);
 
-    var pNow = Math.min(S.betaCont, Math.PI - S.betaCont);
-    var pTgt = S.quant ? nearestAllowed(pNow, S.lq) : pNow;
+    var pNow = Math.min(S.betaCont, Math.PI - S.betaCont);   /* 无向的面倾角 */
+    var pTgt, br;
+
+    if (S.quant) {
+      /* 量子数 m 只在弛豫时演化, 而且只由"与驱动器无关"的布洛赫解决定。
+       * 不弛豫时把它锁住 —— 若用被驱动过的几何倾角反推 m, 会形成
+       * "驱动→改变倾角→改变 m→改变目标→再驱动" 的正反馈, 状态会自己往上爬。 */
+      if (S.relax || S.mNow < 0) S.mNow = mForBeta(S.betaCont, S.lq);
+      var pb = allowedBetas(S.lq)[clamp(S.mNow + S.lq, 0, 2 * S.lq)];
+      pTgt = Math.min(pb, Math.PI - pb);
+      br = (pb > Math.PI / 2) ? 1 : -1;
+    } else {
+      pTgt = pNow;
+      br = (S.betaCont > Math.PI / 2) ? 1 : -1;
+    }
 
     if (S.relax && S.Tau > 0) {
       S.betaDisp += (pTgt - S.betaDisp) * clamp(dtWall / 0.10, 0, 1);  /* 量子跃迁 0.1s 过渡 */
@@ -282,10 +305,7 @@ function createApp(canvas, doc, win) {
     } else {
       S.betaDisp = pNow;              /* 都不开: 保持精确积分, 不动轨道面 */
     }
-    S.mNow = S.quant ? mForBeta(S.betaCont, S.lq) : -1;
-    /* 有向分支: beta>90° 表示 L 在 +Z 一侧。用来把"无向的面倾角"还原成有向方向,
-     * 这样量子化 snap 之后 m 与画出来的锥仍然一一对应。 */
-    S.branch = (S.betaCont > Math.PI / 2) ? 1 : -1;
+    S.branch = br;
 
     /* 观测量 */
     var L = PH.angularMomentum(S);

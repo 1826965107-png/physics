@@ -256,8 +256,10 @@ if (seq[seq.length - 1] !== -lq) errors.push('终点不是基态: ' + seq[seq.le
 const allSeen = seq.slice().sort((a, b) => b - a).join(',');
 if (allSeen !== seq.join(',') || seq.length !== 2 * lq + 1)
   console.log('  (注: 阶梯出现 ' + seq.length + ' 级, 共 2l+1 = ' + (2 * lq + 1) + ' 级)');
-const snapped = allowed.some(a => Math.abs(parseFloat(a) - tiltDeg()) < 1.0) ||
-                allowed.some(a => Math.abs(parseFloat(a) - (180 - tiltDeg())) < 1.0);
+/* 容差 2°: 驱动器故意留了 0.025 rad 死区, 以免每帧去镇压精确积分自带的
+ * O(B) 章动(那会把拉莫尔进动抵消掉)。画出来的锥仍然精确落在允许值上。 */
+const snapped = allowed.some(a => Math.abs(parseFloat(a) - tiltDeg()) < 2.0) ||
+                allowed.some(a => Math.abs(parseFloat(a) - (180 - tiltDeg())) < 2.0);
 if (!snapped) errors.push('开启量子化后轨道面没有落在允许值上: ' + tiltDeg().toFixed(2) + '°');
 else console.log('  → 轨道面已落在允许倾角上 ✓ (β = ' + tiltDeg().toFixed(1) + '°, 对应 m=' + app.state.mNow + ')');
 

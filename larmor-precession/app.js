@@ -859,6 +859,22 @@ function createApp(canvas, doc, win) {
     return p1;
   }
 
+  /* 在圆锥边沿挑一个屏幕位置最靠边的点, 标出这个锥是谁的 */
+  function coneTag(axis, half, len, label, col) {
+    var ab = basis(axis), a = ab[0], u = ab[1], w = ab[2];
+    var ca = Math.cos(half), sa = Math.sin(half);
+    var best = null, bx = -1e9, i, ph, d, p;
+    for (i = 0; i < 12; i++) {
+      ph = i / 12 * TAU;
+      d = [ca * a[0] + sa * (Math.cos(ph) * u[0] + Math.sin(ph) * w[0]),
+           ca * a[1] + sa * (Math.cos(ph) * u[1] + Math.sin(ph) * w[1]),
+           ca * a[2] + sa * (Math.cos(ph) * u[2] + Math.sin(ph) * w[2])];
+      p = project(V.mul(d, len * 1.06));
+      if (p.vis && p.x > bx) { bx = p.x; best = p; }
+    }
+    if (best) text(label, best.x + 8, best.y, 13, rgba(col, 0.92), 'left', true);
+  }
+
   var spinDir = [0, 0, 1];
   function updateSpin() {
     var th = (S.thetaNow === undefined) ? S.theta : S.thetaNow;
@@ -882,6 +898,10 @@ function createApp(canvas, doc, win) {
       if (h > 0.006) {
         drawCone(lax, h, mLen, COL.L, ui.coneA);
         drawCone(max2, h, mLen * 0.5, COL.mu, ui.coneA);
+        /* 在锥的边沿直接标出归属。量子化打开时, 这对进动锥会和某两根
+         * 允许的 m 锥精确重合(同一个曲面), 不标清楚就极易看错谁是谁。 */
+        coneTag(lax, h, mLen, 'L \u8fdb\u52a8\u9525', COL.L);
+        if (ui.mu) coneTag(max2, h, mLen * 0.5, '\u03bc \u8fdb\u52a8\u9525', COL.mu);
       }
     }
     /* --- 角动量 ⟨L⟩ --- */
@@ -1172,6 +1192,10 @@ function createApp(canvas, doc, win) {
     hud('v-ncone', String(2 * S.lq + 1));
     hud('v-mina', S.quant ? (Math.acos(clamp(S.lq / Math.sqrt(S.lq * (S.lq + 1)), -1, 1)) / DEG).toFixed(1) + '\u00b0' : '\u2014');
     hud('v-m', S.quant ? ('m = ' + (S.mNow > 0 ? '+' : '') + S.mNow) : '\u2014');
+    /* 绘制方向与物理轨道法线的夹角: 量化/弛豫开启时的跟踪误差(死区内 <~1.5°) */
+    var uL = V.unit(S.Ldraw || S.L), uP = V.unit(S.L);
+    var dp = Math.abs(uL[0] * uP[0] + uL[1] * uP[1] + uL[2] * uP[2]);
+    hud('v-lm', (Math.acos(clamp(dp, -1, 1)) * 180 / Math.PI).toFixed(2) + '\u00b0');
   }
 
   /* ============================ 画面烧录 (录视频用) ============================ */

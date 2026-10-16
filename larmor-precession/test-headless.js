@@ -161,6 +161,56 @@ console.log('自动停止: elapsed=' + app.rec.elapsed.toFixed(2) + ' s, ' + app
 console.log('录制后画布尺寸: ' + getEl('gl').width + 'x' + getEl('gl').height +
             ' CSS=' + getEl('gl').style.width);
 
+/* ---------------- 弛豫 / 空间量子化 物理验证 ---------------- */
+function tiltDeg() {
+  const L = app.state.L, m = Math.hypot(L[0], L[1], L[2]) || 1;
+  return Math.acos(Math.max(-1, Math.min(1, -L[2] / m))) * 180 / Math.PI;
+}
+getEl('c-quant').checked = false; fire('c-quant', 'change');
+if (app.state.paused) fire('b-pause', 'click');              // 确保在跑 (前面按钮测试暂停过)
+getEl('r-theta').value = '30'; fire('r-theta', 'input');     // θ=30° ⇒ β₀=150°
+getEl('c-relax').checked = true; fire('c-relax', 'change');
+getEl('r-t2').value = '50'; fire('r-t2', 'input');           // T2 = 30 公转周期
+console.log('');
+console.log('弛豫验证: T₂ = ' + (app.state.Tau / (2 * Math.PI)).toFixed(1) +
+            ' 公转周期, 初始 β = ' + tiltDeg().toFixed(1) + '°');
+const b0 = tiltDeg(), sb0 = Math.sin(app.state.theta0);
+const bz0 = app.state.bz, bp0 = app.state.bp, L0m = app.state.L0mag, T2au = app.state.Tau;
+const rows = [];
+console.log('   圈数  |  β 实测(物理倾角) |  β 布洛赫理论 |   |M⊥|/|M|  |  e^(−t/T₂) 理论');
+for (let k = 0; k < 7; k++) {
+  for (let i = 0; i < 240; i++) app.tick(1 / 60);
+  const t = app.state.t;
+  const bz = -L0m + (bz0 + L0m) * Math.exp(-t / (2 * T2au));
+  const bp = bp0 * Math.exp(-t / T2au);
+  const predBeta = Math.atan2(Math.max(bp, 0), -bz) * 180 / Math.PI;
+  const got = tiltDeg();
+  rows.push([t / (2 * Math.PI), got, predBeta, bp / L0m, Math.sin(app.state.theta0) * Math.exp(-t / T2au)]);
+  console.log('  ' + (t / (2 * Math.PI)).toFixed(1).padStart(6) + '  |  ' + got.toFixed(1).padStart(13) + '°  |  ' +
+              predBeta.toFixed(1).padStart(11) + '°  |  ' + (bp / L0m).toFixed(4).padStart(9) + '   |  ' +
+              (Math.sin(app.state.theta0) * Math.exp(-t / T2au)).toFixed(4).padStart(9));
+}
+const dMax = Math.max.apply(null, rows.map(r => Math.abs(r[1] - r[2])));
+if (dMax > 2.0) errors.push('物理倾角没有跟上布洛赫解: 最大偏差 ' + dMax.toFixed(2) + '°');
+else console.log('  → 物理倾角 β 与布洛赫解最大偏差 ' + dMax.toFixed(2) + '° ✓');
+if (!(rows[rows.length - 1][1] < b0 - 5)) errors.push('弛豫没有让 L 向平衡方向收拢');
+else console.log('  → 收拢正常: β ' + rows.map(r => r[1].toFixed(0) + '°').join(' → ') +
+                 '（终点是 −Z, 即 L 反平行于 B、μ 沿 +Z）');
+
+getEl('c-quant').checked = true; fire('c-quant', 'change');
+const lq = app.state.lq;
+const allowed = [];
+for (let m = -lq; m <= lq; m++) allowed.push((Math.acos(-m / Math.sqrt(lq * (lq + 1))) * 180 / Math.PI).toFixed(1) + '°');
+console.log('空间量子化: l = ' + lq + ', 2l+1 = ' + (2 * lq + 1) + ' 个允许 β 值 = ' + allowed.join(', '));
+console.log('  最小夹角 θmin = ' + (Math.acos(lq / Math.sqrt(lq * (lq + 1))) * 180 / Math.PI).toFixed(1) +
+            '° → L 永远到不了 −Z 轴上');
+for (let i = 0; i < 900; i++) app.tick(1 / 60);
+console.log('  继续演化后: β = ' + tiltDeg().toFixed(1) + '°, 当前 m = ' + app.state.mNow +
+            ' (基态 m = ' + (-lq) + ')');
+const snapped = allowed.some(a => Math.abs(parseFloat(a) - tiltDeg()) < 0.6);
+if (!snapped) errors.push('开启量子化后 β 没有落在允许值上: ' + tiltDeg().toFixed(2) + '°, 允许 ' + allowed.join(','));
+else console.log('  → β 已 snap 到允许值 ✓');
+
 /* ---------------- 检查元素 id 与 index.html 一致 ---------------- */
 const appSrc = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
 const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');

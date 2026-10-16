@@ -146,6 +146,17 @@
   <div class="row"><span class="k">当前场 / 默认场</span><span class="v" id="v-mag">—</span></div>
   <div class="row"><span class="k">真实 1 T 时 &omega;<sub>L</sub>/&omega;<sub>0</sub> / 圈数</span><span class="v" id="v-1T">—</span></div>
 
+  <hr>
+  <div class="sec">弛豫 · 空间量子化</div>
+  <div class="row"><span class="k">距平衡角 β = ∠(L, −Z)</span><span class="v mi" id="v-beta">—</span></div>
+  <div class="row"><span class="k">横向相干 sin β（实测）</span><span class="v mi" id="v-sinb">—</span></div>
+  <div class="row"><span class="k">指数包络 e<sup>−t/T₂</sup>（预测）</span><span class="v" id="v-sinb-ref">—</span></div>
+  <div class="row"><span class="k">T₂</span><span class="v" id="v-tau">—</span></div>
+  <div class="row"><span class="k">角量子数 l</span><span class="v" id="v-lq">—</span></div>
+  <div class="row"><span class="k">允许锥数 2l+1</span><span class="v" id="v-ncone">—</span></div>
+  <div class="row"><span class="k">当前 m</span><span class="v" id="v-m">—</span></div>
+  <div class="row"><span class="k">最小夹角 θ<sub>min</sub></span><span class="v" id="v-mina">—</span></div>
+
   <div class="note">
     <b>积分的是精确方程</b>：<span style="font-family:ui-monospace,Consolas,monospace">a = −r/|r|³ − v×B</span>，
     对 B 不做任何展开，RK4 步长 2π/1800。进动是从积分里<b>涌现</b>的，不是硬塞的。
@@ -191,6 +202,20 @@
     <button id="b-v2">45° 俯视</button>
     <button id="b-v3">沿 Z 俯视</button>
   </div>
+
+  <div class="sec" style="margin-top:15px">弛豫 · 空间量子化</div>
+  <div class="checks" style="margin-top:0">
+    <label><input type="checkbox" id="c-relax">弛豫（阻尼）</label>
+    <label><input type="checkbox" id="c-quant">空间量子化</label>
+    <label><input type="checkbox" id="c-panels" checked>角标图</label>
+  </div>
+
+  <label class="ctl" style="margin-top:8px">横向弛豫时间 T₂ <span id="l-t2">40 圈</span></label>
+  <input id="r-t2" type="range" min="0" max="100" step="1" value="40">
+
+  <label class="ctl">角量子数 <span id="l-l">l = 2 (5 个锥)</span></label>
+  <input id="r-l" type="range" min="1" max="6" step="1" value="2">
+  <button id="b-pulse" style="width:100%;margin-top:8px">π/2 脉冲（置 θ = 90°，FID 起点）</button>
 
   <div class="btns">
     <button id="b-pause">暂停 ⏸</button>

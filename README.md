@@ -18,11 +18,15 @@ dv/dt = − r/|r|³  −  v × B        （原子单位，RK4，每圈公转 180
 
 程序里对磁场 B **不做任何展开、不做任何近似**，`ω_L = eB/2m` 从不出现在代码里——它是从积分结果反推、再与理论对照的。所以这个项目同时也是一台拉莫尔定理检验机。
 
-![界面](larmor-precession/preview-1-ui.png)
+![界面](larmor-precession/preview-1-ui.jpg)
 
-![默认视图：轨道环绕 Z 轴叠开成扇面](larmor-precession/preview-2-fan.png)
+![默认视图：轨道环绕 Z 轴叠开成扇面](larmor-precession/preview-2-fan.jpg)
 
-![把轨迹拉长就是"毛线球"](larmor-precession/preview-3-wool.png)
+![弛豫：对顶双锥单调收口，L 落向 −Z、μ 落向 +Z](larmor-precession/preview-4-relax.jpg)
+
+![空间量子化：只剩 2l+1 个允许锥](larmor-precession/preview-5-quant.jpg)
+
+![把轨迹拉长就是"毛线球"](larmor-precession/preview-3-wool.jpg)
 
 **数值验证**（`node larmor-precession/verify.js`）：
 

@@ -259,20 +259,29 @@ function createApp(canvas, doc, win) {
     if (S.hist.length > histCap) S.hist.splice(0, S.hist.length - histCap);
     if (S.recent.length > CFG.recentMax) S.recent.splice(0, S.recent.length - CFG.recentMax);
 
-    /* ---- 弛豫: 布洛赫唯象阻尼 ---- */
+    /* ---- 弛豫 / 空间量子化 对"轨道面取向"的约束 ----
+     * 注意: 轨道面是"无向"的 —— 面倾角 p 与 180°-p 是同一个面。
+     * 但量子数 m 是"有向"的: 对 l=2, 允许的有向 beta 是
+     *   35.3°(m=-2) 65.9°(-1) 90°(0) 114.1°(+1) 144.7°(+2)
+     * 而面倾角只有 35.3/65.9/90 三个值, 35.3° 同时对应 m=±2。
+     * 所以 m 必须由有向的布洛赫倾角 S.betaCont 决定, 绝不能由驱动后的
+     * 几何倾角决定 —— 否则高亮会在 +m 和 -m 之间乱跳。 */
+    if (S.relax && S.Tau > 0) blochStep(dtSim);
+    else S.betaCont = tiltFromEq(S.L);
+
+    var pNow = Math.min(S.betaCont, Math.PI - S.betaCont);
+    var pTgt = S.quant ? nearestAllowed(pNow, S.lq) : pNow;
+
     if (S.relax && S.Tau > 0) {
-      blochStep(dtSim);
-      /* 驱动目标是"轨道面"的倾斜(无向), 所以用 min(beta, 180-beta):
-       * 纯纵向(反转恢复)时 beta 从 180 跳到 0, 但两者对应同一个赤道面, 无需翻转。 */
-      var bp2 = Math.min(S.betaCont, Math.PI - S.betaCont);
-      var tgt = S.quant ? nearestAllowed(bp2, S.lq) : bp2;
-      S.betaDisp += (tgt - S.betaDisp) * clamp(dtWall / 0.10, 0, 1);
+      S.betaDisp += (pTgt - S.betaDisp) * clamp(dtWall / 0.10, 0, 1);  /* 量子跃迁 0.1s 过渡 */
+      relaxTilt();
+    } else if (S.quant) {
+      S.betaDisp = pTgt;              /* 只开量子化: 轨道面被约束在允许的锥上 */
       relaxTilt();
     } else {
-      S.betaCont = tiltFromEq(S.L);
-      S.betaDisp = Math.min(S.betaCont, Math.PI - S.betaCont);
+      S.betaDisp = pNow;              /* 都不开: 保持精确积分, 不动轨道面 */
     }
-    if (S.quant) S.mNow = mForBeta(tiltFromEq(S.L), S.lq);
+    S.mNow = S.quant ? mForBeta(S.betaCont, S.lq) : -1;
 
     /* 观测量 */
     var L = PH.angularMomentum(S);

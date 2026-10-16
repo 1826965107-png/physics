@@ -231,15 +231,35 @@ getEl('c-quant').checked = true; fire('c-quant', 'change');
 const lq = app.state.lq;
 const allowed = [];
 for (let m = -lq; m <= lq; m++) allowed.push((Math.acos(-m / Math.sqrt(lq * (lq + 1))) * 180 / Math.PI).toFixed(1) + '°');
-console.log('空间量子化: l = ' + lq + ', 2l+1 = ' + (2 * lq + 1) + ' 个允许 β 值 = ' + allowed.join(', '));
+console.log('空间量子化: l = ' + lq + ', 2l+1 = ' + (2 * lq + 1) + ' 个允许的有向 β 值 = ' + allowed.join(', '));
 console.log('  最小夹角 θmin = ' + (Math.acos(lq / Math.sqrt(lq * (lq + 1))) * 180 / Math.PI).toFixed(1) +
             '° → L 永远到不了 −Z 轴上');
-for (let i = 0; i < 900; i++) app.tick(1 / 60);
-console.log('  继续演化后: β = ' + tiltDeg().toFixed(1) + '°, 当前 m = ' + app.state.mNow +
-            ' (基态 m = ' + (-lq) + ')');
-const snapped = allowed.some(a => Math.abs(parseFloat(a) - tiltDeg()) < 0.6);
-if (!snapped) errors.push('开启量子化后 β 没有落在允许值上: ' + tiltDeg().toFixed(2) + '°, 允许 ' + allowed.join(','));
-else console.log('  → β 已 snap 到允许值 ✓');
+/* 高亮必须单调下梯: 之前用"几何倾角"算 m, 会因为面倾角 35.3° 同时对应 m=±2 而乱跳 */
+if (!app.state.relax) { getEl('c-relax').checked = true; fire('c-relax', 'change'); }
+/* 弛豫已开, 直接设 θ=30° 重置; 不重新触发 change, 否则会按协议自动打 π/2 脉冲改成 m=0 */
+getEl('r-theta').value = '30'; fire('r-theta', 'input');       // θ=30° ⇒ 有向 β=150° ⇒ m=+2 起步
+console.log('  起点: θ=' + (app.state.theta * 180 / Math.PI).toFixed(0) + '°, β=' +
+            (app.state.betaCont * 180 / Math.PI).toFixed(1) + '° ⇒ m=' + app.state.mNow);
+const seq = [];
+let prevM = null;
+for (let i = 0; i < 3600; i++) {
+  app.tick(1 / 60);
+  if (app.state.mNow !== prevM) { seq.push(app.state.mNow); prevM = app.state.mNow; }
+}
+console.log('  量子数阶梯: m ' + seq.join(' → ') + '   (应从 +2 一路降到基态 m=' + (-lq) + ')');
+let mono = true;
+for (let i = 1; i < seq.length; i++) if (seq[i] > seq[i - 1]) mono = false;
+if (!mono) errors.push('量子数高亮不是单调下梯, 出现了乱跳: ' + seq.join(' → '));
+else console.log('  → 单调下梯, 无来回跳 ✓');
+if (seq[0] !== lq) errors.push('起点不是 m=+l: ' + seq[0]);
+if (seq[seq.length - 1] !== -lq) errors.push('终点不是基态: ' + seq[seq.length - 1]);
+const allSeen = seq.slice().sort((a, b) => b - a).join(',');
+if (allSeen !== seq.join(',') || seq.length !== 2 * lq + 1)
+  console.log('  (注: 阶梯出现 ' + seq.length + ' 级, 共 2l+1 = ' + (2 * lq + 1) + ' 级)');
+const snapped = allowed.some(a => Math.abs(parseFloat(a) - tiltDeg()) < 1.0) ||
+                allowed.some(a => Math.abs(parseFloat(a) - (180 - tiltDeg())) < 1.0);
+if (!snapped) errors.push('开启量子化后轨道面没有落在允许值上: ' + tiltDeg().toFixed(2) + '°');
+else console.log('  → 轨道面已落在允许倾角上 ✓ (β = ' + tiltDeg().toFixed(1) + '°, 对应 m=' + app.state.mNow + ')');
 
 /* ---------------- 检查元素 id 与 index.html 一致 ---------------- */
 const appSrc = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');

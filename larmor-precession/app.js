@@ -466,59 +466,61 @@ function createApp(canvas, doc, win) {
   function drawSphereAndBand() {
     var R = 1.0, i, j, pts, ph, a;
     var grid = [];
-    /* 经线 */
-    for (j = 0; j < 8; j++) {
-      a = j * Math.PI / 4; pts = [];
-      for (i = 0; i <= 40; i++) { ph = i / 40 * TAU; pts.push([R * Math.cos(ph) * Math.cos(a), R * Math.cos(ph) * Math.sin(a), R * Math.sin(ph)]); }
+    /* 经线: 6 条足够撑出球感, 再多就只是噪点 */
+    for (j = 0; j < 6; j++) {
+      a = j * Math.PI / 6; pts = [];
+      for (i = 0; i <= 36; i++) { ph = i / 36 * TAU; pts.push([R * Math.cos(ph) * Math.cos(a), R * Math.cos(ph) * Math.sin(a), R * Math.sin(ph)]); }
       grid.push(projectPoly(pts));
     }
-    /* 纬线 */
-    for (j = -4; j <= 4; j++) {
-      var th = j * Math.PI / 10, rr = R * Math.cos(th), zz = R * Math.sin(th); pts = [];
-      for (i = 0; i <= 56; i++) { ph = i / 56 * TAU; pts.push([rr * Math.cos(ph), rr * Math.sin(ph), zz]); }
+    /* 纬线: 5 条 (含赤道), 间距 22.5° */
+    for (j = -2; j <= 2; j++) {
+      var th = j * Math.PI / 8, rr = R * Math.cos(th), zz = R * Math.sin(th); pts = [];
+      for (i = 0; i <= 48; i++) { ph = i / 48 * TAU; pts.push([rr * Math.cos(ph), rr * Math.sin(ph), zz]); }
       grid.push(projectPoly(pts));
     }
-    strokeBatch(grid, COL.sphere, 0.105, 1);
+    strokeBatch(grid, COL.sphere, 0.072, 1);
 
     /* 球面带: 电子轨迹的极角包络 [90-theta, 90+theta]。theta 必须用当前倾角,
-     * 否则弛豫时带子不跟着变。 */
+     * 否则弛豫时带子不跟着变。
+     * 只画上下两条边界环 —— 中间那 15 圈水平环会堆成一个"桶", 和轨迹抢视线,
+     * 而带子的信息量本来就在边界上。 */
     if (ui.band) {
       var thB = (S.thetaNow === undefined) ? S.theta : S.thetaNow;
       var th1 = Math.PI / 2 - thB, th2 = Math.PI / 2 + thB;
-      var rings = [], edges = [], k;
-      for (k = 0; k <= 14; k++) {
-        var tt = th1 + (th2 - th1) * k / 14;
+      var edges = [], k;
+      for (k = 0; k < 2; k++) {
+        var tt = k ? th2 : th1;
         var rr2 = R * Math.sin(tt), zz2 = R * Math.cos(tt);
         pts = [];
         for (i = 0; i <= 72; i++) { ph = i / 72 * TAU; pts.push([rr2 * Math.cos(ph), rr2 * Math.sin(ph), zz2]); }
-        (k === 0 || k === 14 ? edges : rings).push(projectPoly(pts));
+        edges.push(projectPoly(pts));
       }
-      strokeBatch(rings, COL.band, 0.155, 1);
-      strokeBatch(edges, COL.edge, 0.62, 1.7);
+      strokeBatch(edges, COL.edge, 0.58, 1.6);
     }
   }
 
   function drawField() {
     if (!ui.field) return;
-    strokeBatch([projectPoly([[0, 0, -2.0], [0, 0, 2.05]])], COL.axis, 0.55, 1.6);
-    strokeBatch([projectPoly([[0, 0, -2.0], [0, 0, 2.05]])], COL.axis, 0.10, 9);
-    /* 平行场线 + 漂移箭头 */
-    var nf = 8, i, k, lines = [], chev = [[], [], []];
+    /* Z 轴 (= B 方向): 唯一的竖直参考线, 收短到球外一点, 不再贯穿整屏 */
+    strokeBatch([projectPoly([[0, 0, -1.80], [0, 0, 1.86]])], COL.axis, 0.48, 1.5);
+    strokeBatch([projectPoly([[0, 0, -1.80], [0, 0, 1.86]])], COL.axis, 0.045, 6);
+    /* 平行场线: 只出现在球附近 (±1.3), 不跑出画面变成"划痕" */
+    var nf = 6, i, k, lines = [], chev = [[], [], []];
     for (k = 0; k < nf; k++) {
-      var a = k / nf * TAU, R = 1.52;
+      var a = k / nf * TAU, R = 1.42;
       var x = R * Math.cos(a), y = R * Math.sin(a);
-      lines.push(projectPoly([[x, y, -1.95], [x, y, 1.95]]));
-      for (i = 0; i < 3; i++) {
-        var zz = ((S.t * 0.28 + i * 0.333 + k * 0.03) % 1) * 3.9 - 1.95;
-        var p0 = project([x, y, zz]), p1 = project([x, y, zz + 0.085]);
+      lines.push(projectPoly([[x, y, -1.12], [x, y, 1.12]]));
+      for (i = 0; i < 2; i++) {
+        var zz = ((S.t * 0.16 + i * 0.5 + k * 0.045) % 1) * 2.24 - 1.12;
+        var p0 = project([x, y, zz]), p1 = project([x, y, zz + 0.07]);
         if (!p0.vis || !p1.vis) continue;
         var dx = p1.x - p0.x, dy = p1.y - p0.y, L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L;
-        var s = 3.4;
+        var s = 3.0;
         var b = clamp(Math.floor((view.dist + 1.6 - p0.z) / 1.4), 0, 2);
         chev[b].push([p1.x, p1.y, p0.x - dy * s * 0.62, p0.y + dx * s * 0.62, p0.x + dy * s * 0.62, p0.y - dx * s * 0.62]);
       }
     }
-    strokeBatch(lines, COL.field, 0.20, 1);
+    strokeBatch(lines, COL.field, 0.115, 1);
     for (i = 0; i < 3; i++) {           /* 箭头按深度分 3 档批量填充 */
       if (!chev[i].length) continue;
       ctx.beginPath();
@@ -526,22 +528,22 @@ function createApp(canvas, doc, win) {
         var c = chev[i][k];
         ctx.moveTo(c[0], c[1]); ctx.lineTo(c[2], c[3]); ctx.lineTo(c[4], c[5]); ctx.closePath();
       }
-      ctx.fillStyle = rgba(COL.field, 0.14 + 0.09 * i); ctx.fill();
+      ctx.fillStyle = rgba(COL.field, 0.13 + 0.08 * i); ctx.fill();
     }
-    /* B 轴箭头 + 标签 (显式标出这就是 Z 轴) */
-    var pt = project([0, 0, 2.05]);
+    /* Z 轴标签 (显式标出这就是 B 的方向; 不再重复写 "B ∥ Z") */
+    var pt = project([0, 0, 1.86]);
     if (pt.vis) {
-      sprite(pt.x, pt.y, 22, COL.axis, 0.42);
-      text('Z', pt.x + 15, pt.y - 12, 21, rgba(COL.axis, 0.98), 'left', true);
-      text('B \u2225 Z', pt.x + 15, pt.y + 10, 14, rgba(COL.axis, 0.75), 'left', false);
+      sprite(pt.x, pt.y, 18, COL.axis, 0.38);
+      text('Z', pt.x + 14, pt.y - 12, 20, rgba(COL.axis, 0.96), 'left', true);
+      text('B', pt.x + 14, pt.y + 9, 13, rgba(COL.axis, 0.62), 'left', false);
     }
     /* 坐标轴 X / Y (赤道面内), 给"绕 Z 转"一个绝对参考 */
     if (ui.axes) {
-      var LA = 1.40, k2, ax = [[[-LA, 0, 0], [LA, 0, 0], 'X'], [[0, -LA, 0], [0, LA, 0], 'Y']];
+      var LA = 1.20, k2, ax = [[[-LA, 0, 0], [LA, 0, 0], 'X'], [[0, -LA, 0], [0, LA, 0], 'Y']];
       for (k2 = 0; k2 < 2; k2++) {
-        polyAll(ax[k2], COL.xyz, 0.22, 1);
+        polyAll(ax[k2], COL.xyz, 0.15, 1);
         var q = project(ax[k2][1]);
-        if (q.vis) text(ax[k2][2], q.x + 7, q.y - 7, 14, rgba(COL.xyz, 0.78), 'left', false);
+        if (q.vis) text(ax[k2][2], q.x + 6, q.y - 6, 12, rgba(COL.xyz, 0.62), 'left', false);
       }
     }
   }
@@ -599,8 +601,8 @@ function createApp(canvas, doc, win) {
     var b = basis(S.L0), u = b[1], w = b[2];
     var R = S.rmag, pts = [], i, a2;
     for (i = 0; i <= 72; i++) { a2 = i / 72 * TAU; pts.push(V.add(V.mul(u, R * Math.cos(a2)), V.mul(w, R * Math.sin(a2)))); }
-    if (ctx.setLineDash) ctx.setLineDash([6, 8]);
-    polyAll(pts, COL.ghost, 0.40, 1.3);
+    if (ctx.setLineDash) ctx.setLineDash([5, 9]);
+    polyAll(pts, COL.ghost, 0.26, 1.2);
     if (ctx.setLineDash) ctx.setLineDash([]);
   }
 
@@ -613,10 +615,13 @@ function createApp(canvas, doc, win) {
     if (rL < 0.02) return;
     var i, N = 96, pts = [], ph;
 
-    /* L 矢端的水平轨迹圆 (= 进动锥的边沿) */
-    for (i = 0; i <= N; i++) { ph = i / N * TAU; pts.push([rL * Math.cos(ph), rL * Math.sin(ph), zL]); }
-    polyAll(pts, COL.dial, 0.34, 1.2);
-    polyAll(pts, COL.dial, 0.055, 8);
+    /* L 矢端的水平轨迹圆 (= 进动锥的边沿)。
+     * 进动锥开着时这条圆和锥沿**完全重合**, 画两条就成双环 → 交给锥去画。 */
+    if (!ui.cone) {
+      for (i = 0; i <= N; i++) { ph = i / N * TAU; pts.push([rL * Math.cos(ph), rL * Math.sin(ph), zL]); }
+      polyAll(pts, COL.dial, 0.30, 1.2);
+      if (S.showGlow) polyAll(pts, COL.dial, 0.05, 8);
+    }
 
     /* 残影弧: 从当前相位往回 1.5π, 分 4 段渐隐 —— 直接读出转向和快慢 */
     var ph0 = Math.atan2(a[1], a[0]), seg, K = 14;
@@ -658,7 +663,12 @@ function createApp(canvas, doc, win) {
       ctx.lineTo(pA.x - dx * 3 - dy * 5.5, pA.y - dy * 3 + dx * 5.5);
       ctx.lineTo(pA.x - dx * 3 + dy * 5.5, pA.y - dy * 3 - dx * 5.5);
       ctx.closePath(); ctx.fillStyle = rgba(COL.dialA, 0.95); ctx.fill();
-      text('\u03c9_L', pA.x + dx * 18 + 2, pA.y + dy * 18 - 8, 15, rgba(COL.dialA, 0.95), 'left', true);
+      /* 标签沿**径向向外**放, 不要沿切向 —— 切向会把它推到 Z 轴上, 和 "Z" 撞在一起 */
+      var pc = project([0, 0, zL]);
+      var rx = pc.vis ? pA.x - pc.x : 0, ry = pc.vis ? pA.y - pc.y : -1;
+      var rl = Math.hypot(rx, ry) || 1; rx /= rl; ry /= rl;
+      var lx = pA.x + rx * 26 - 6, ly2 = Math.min(pA.y + ry * 26, view.h - 116);
+      text('\u03c9_L', lx, ly2, 14, rgba(COL.dialA, 0.92), 'left', true);
     }
 
     var pt = project(tip);
@@ -769,14 +779,15 @@ function createApp(canvas, doc, win) {
   function drawInsets() {
     var s = Math.max(0.55, Math.min(view.w / 1500, view.h / 900));
     var both = (S.relax && S.quant && ui.relaxPanel && ui.quantPanel);
-    var w = 330 * s, h = 132 * s, y = 22 * s;
+    var w = 330 * s, h = 132 * s, y = (ui.burn ? 126 : 22) * s;
     if (both) {
       drawCohInset(view.cx - w - 8 * s, y, w, h);
       drawLadderInset(view.cx + 8 * s, y, w, h);
     } else if (S.relax && ui.relaxPanel) {
-      drawCohInset(view.cx - w / 2, y, w, h);
+      /* 单个角标图放 Z 轴**左边** —— 正中间会被 Z 轴穿过, 还把 "Z" 标签盖掉 */
+      drawCohInset(view.cx - 26 * s - w, y, w, h);
     } else if (S.quant && ui.quantPanel) {
-      drawLadderInset(view.cx - w / 2, y, w, h);
+      drawLadderInset(view.cx - 26 * s - w, y, w, h);
     }
   }
 
@@ -1024,14 +1035,27 @@ function createApp(canvas, doc, win) {
     });
     el['r-trail'].addEventListener('input', function () { S.trailFrac = parseFloat(el['r-trail'].value) / 100; });
 
+    /* 图例只列出**当前开启**的图层, 否则一排常驻条目本身就是噪声 */
+    function refreshLegend() {
+      var lg = doc.getElementById('legend'); if (!lg || !lg.querySelectorAll) return;
+      var map = { l: true, mu: ui.mu, B: ui.field, orbit: ui.trail, band: ui.band, spin: ui.spin };
+      var ks = lg.querySelectorAll('[data-k]'), any = 0, i2, on;
+      for (i2 = 0; i2 < ks.length; i2++) {
+        on = !!map[ks[i2].getAttribute('data-k')];
+        ks[i2].style.display = on ? '' : 'none';
+        if (on) any++;
+      }
+      lg.style.display = any ? 'flex' : 'none';
+    }
     function bindChk(id, key) {
-      el[id].addEventListener('change', function () { ui[key] = !!el[id].checked; });
+      el[id].addEventListener('change', function () { ui[key] = !!el[id].checked; refreshLegend(); });
       ui[key] = !!el[id].checked;
     }
     bindChk('c-sphere', 'sphere'); bindChk('c-band', 'band'); bindChk('c-cone', 'cone');
     bindChk('c-mu', 'mu'); bindChk('c-spin', 'spin'); bindChk('c-field', 'field');
     bindChk('c-trail', 'trail'); bindChk('c-auto', 'auto');
     bindChk('c-axes', 'axes'); bindChk('c-dial', 'dial'); bindChk('c-ghost', 'ghost');
+    refreshLegend();
     el['c-panels'].addEventListener('change', function () {
       ui.relaxPanel = ui.quantPanel = !!el['c-panels'].checked;
     });
@@ -1226,7 +1250,7 @@ function createApp(canvas, doc, win) {
     text('\u03b8 = ' + S.thetaDeg.toFixed(0) + '\u00b0', pad + 200 * s, y0, 17 * s, 'rgba(230,240,255,0.92)', 'left', false);
     text('\u5df2\u516c\u8f6c ' + (S.t / TAU).toFixed(1) + ' \u5708', pad + 310 * s, y0, 17 * s, 'rgba(230,240,255,0.92)', 'left', false);
     text('L \u5df2\u8fdb\u52a8 ' + (Math.abs(S.phiAcc) / DEG).toFixed(0) + '\u00b0', pad + 480 * s, y0, 17 * s, 'rgba(255,190,74,0.96)', 'left', true);
-    text('B = ' + Breal.toExponential(2) + ' T', pad + 680 * s, y0, 17 * s, 'rgba(150,246,196,0.96)', 'left', true);
+    text('B = ' + Breal.toExponential(2) + ' T', pad + 726 * s, y0, 17 * s, 'rgba(150,246,196,0.96)', 'left', true);
     text('\u771f\u5b9e 1 T \u65f6 \u03c9_L/\u03c9\u2080 = 2.1\u00d710\u207b\u2076\uff0c\u8fdb\u52a8 1 \u5708\u9700\u516c\u8f6c 4.7\u00d710\u2075 \u5708 \u2014\u2014 \u6f14\u793a\u4e3a\u53ef\u89c6\u5316\u5df2\u653e\u5927\u78c1\u573a',
          pad, h - 42 * s, 14 * s, 'rgba(150,172,204,0.85)', 'left', false);
 
